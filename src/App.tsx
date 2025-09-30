@@ -4,6 +4,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
+import Auth from "./pages/Auth";
+import YoutubeSummarizer from "./pages/YoutubeSummarizer";
+import StockScreener from "./pages/StockScreener";
+import PromptGenerator from "./pages/PromptGenerator";
+import MarketOverview from "./pages/MarketOverview";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -16,6 +21,11 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/youtube-summarizer" element={<YoutubeSummarizer />} />
+          <Route path="/stock-screener" element={<StockScreener />} />
+          <Route path="/prompt-generator" element={<PromptGenerator />} />
+          <Route path="/market-overview" element={<MarketOverview />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
