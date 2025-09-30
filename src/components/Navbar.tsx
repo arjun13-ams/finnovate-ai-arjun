@@ -7,10 +7,11 @@ import {
   NavigationMenuList,
   NavigationMenuTrigger,
 } from "@/components/ui/navigation-menu";
-import { Menu, Moon, Sun } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Menu, Moon, Sun, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useAuth } from "@/hooks/useAuth";
 
 const products = [
   {
@@ -37,6 +38,8 @@ const products = [
 
 export const Navbar = () => {
   const [isDark, setIsDark] = useState(false);
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const isDarkMode = document.documentElement.classList.contains("dark");
@@ -46,6 +49,11 @@ export const Navbar = () => {
   const toggleDarkMode = () => {
     document.documentElement.classList.toggle("dark");
     setIsDark(!isDark);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
   };
 
   return (
@@ -102,12 +110,23 @@ export const Navbar = () => {
             )}
           </Button>
 
-          <Link to="/auth">
-            <Button variant="outline">Log In</Button>
-          </Link>
-          <Link to="/auth">
-            <Button className="btn-primary">Get Started</Button>
-          </Link>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">{user.email}</span>
+              <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign Out">
+                <LogOut className="h-5 w-5" />
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Link to="/auth">
+                <Button variant="outline">Log In</Button>
+              </Link>
+              <Link to="/auth">
+                <Button className="btn-primary">Get Started</Button>
+              </Link>
+            </>
+          )}
         </div>
 
         {/* Mobile Navigation */}
@@ -146,16 +165,30 @@ export const Navbar = () => {
                   </Link>
                 ))}
                 <div className="pt-4 space-y-2">
-                  <Link to="/auth" className="block">
-                    <Button variant="outline" className="w-full">
-                      Log In
-                    </Button>
-                  </Link>
-                  <Link to="/auth" className="block">
-                    <Button className="btn-primary w-full">
-                      Get Started
-                    </Button>
-                  </Link>
+                  {user ? (
+                    <>
+                      <div className="text-sm text-muted-foreground mb-2">
+                        {user.email}
+                      </div>
+                      <Button onClick={handleSignOut} variant="outline" className="w-full">
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Sign Out
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Link to="/auth" className="block">
+                        <Button variant="outline" className="w-full">
+                          Log In
+                        </Button>
+                      </Link>
+                      <Link to="/auth" className="block">
+                        <Button className="btn-primary w-full">
+                          Get Started
+                        </Button>
+                      </Link>
+                    </>
+                  )}
                 </div>
               </div>
             </SheetContent>

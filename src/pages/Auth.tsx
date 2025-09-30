@@ -1,32 +1,73 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Navbar } from "@/components/Navbar";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 const Auth = () => {
   const [isLoading, setIsLoading] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
   const { toast } = useToast();
+  const { signIn, signUp, user } = useAuth();
+  const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent, type: "login" | "signup") => {
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate auth process
-    setTimeout(() => {
-      setIsLoading(false);
+    const { error } = await signIn(loginEmail, loginPassword);
+    
+    if (error) {
       toast({
-        title: type === "login" ? "Welcome back!" : "Account created!",
-        description: type === "login" 
-          ? "You've successfully logged in." 
-          : "Please check your email to verify your account.",
+        title: "Login failed",
+        description: error.message,
+        variant: "destructive"
       });
-    }, 1500);
+    } else {
+      toast({
+        title: "Welcome back!",
+        description: "You've successfully logged in."
+      });
+    }
+    
+    setIsLoading(false);
+  };
+
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    
+    const { error } = await signUp(signupEmail, signupPassword);
+    
+    if (error) {
+      toast({
+        title: "Signup failed",
+        description: error.message,
+        variant: "destructive"
+      });
+    } else {
+      toast({
+        title: "Account created!",
+        description: "You can now log in with your credentials."
+      });
+    }
+    
+    setIsLoading(false);
   };
 
   return (
@@ -52,7 +93,7 @@ const Auth = () => {
             </TabsList>
 
             <TabsContent value="login">
-              <form onSubmit={(e) => handleSubmit(e, "login")} className="space-y-4">
+              <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="login-email">Email</Label>
                   <div className="relative">
@@ -62,6 +103,8 @@ const Auth = () => {
                       type="email"
                       placeholder="name@example.com"
                       className="pl-10"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -75,6 +118,8 @@ const Auth = () => {
                       type="password"
                       placeholder="••••••••"
                       className="pl-10"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
                       required
                     />
                   </div>
@@ -111,7 +156,7 @@ const Auth = () => {
             </TabsContent>
 
             <TabsContent value="signup">
-              <form onSubmit={(e) => handleSubmit(e, "signup")} className="space-y-4">
+              <form onSubmit={handleSignup} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="signup-email">Email</Label>
                   <div className="relative">
@@ -121,6 +166,8 @@ const Auth = () => {
                       type="email"
                       placeholder="name@example.com"
                       className="pl-10"
+                      value={signupEmail}
+                      onChange={(e) => setSignupEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -134,6 +181,8 @@ const Auth = () => {
                       type="password"
                       placeholder="••••••••"
                       className="pl-10"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
                       required
                     />
                   </div>
