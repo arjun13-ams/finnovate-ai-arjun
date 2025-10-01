@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      ohlcv_last_6_months: {
+        Row: {
+          close: number
+          created_at: string | null
+          date: string
+          high: number
+          id: string
+          low: number
+          open: number
+          symbol: string
+          volume: number
+        }
+        Insert: {
+          close: number
+          created_at?: string | null
+          date: string
+          high: number
+          id?: string
+          low: number
+          open: number
+          symbol: string
+          volume: number
+        }
+        Update: {
+          close?: number
+          created_at?: string | null
+          date?: string
+          high?: number
+          id?: string
+          low?: number
+          open?: number
+          symbol?: string
+          volume?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

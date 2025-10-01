@@ -4,14 +4,73 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
-import { TrendingUp, Lock } from "lucide-react";
+import { TrendingUp, Lock, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const StockScreener = () => {
   const [query, setQuery] = useState("");
-  const isLoggedIn = false; // This will be connected to auth later
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const { user, loading } = useAuth();
+  const { toast } = useToast();
 
-  if (!isLoggedIn) {
+  const handleScreenStocks = async () => {
+    if (!query.trim()) {
+      toast({
+        title: "Query required",
+        description: "Please enter a screening query",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    setResults([]);
+
+    try {
+      // Call the stock screener edge function
+      const { data, error } = await supabase.functions.invoke('stock-screener', {
+        body: { query: query.trim() }
+      });
+
+      if (error) throw error;
+
+      if (data?.results) {
+        setResults(data.results);
+        toast({
+          title: "Screening complete",
+          description: `Found ${data.results.length} stocks matching your criteria`,
+        });
+      } else {
+        toast({
+          title: "No results",
+          description: "No stocks matched your screening criteria",
+        });
+      }
+    } catch (error: any) {
+      console.error('Stock screening error:', error);
+      toast({
+        title: "Screening failed",
+        description: error.message || "Failed to screen stocks. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
     return (
       <div className="min-h-screen flex flex-col">
         <Navbar />
@@ -64,15 +123,39 @@ const StockScreener = () => {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Your Query</label>
                 <Textarea
-                  placeholder="Example: Show me tech stocks with P/E ratio under 20 and market cap over 1B"
+                  placeholder="Example: RSI below 30 and volume spike 2x SMA 20"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   rows={4}
                 />
-                <Button className="btn-primary w-full md:w-auto">
-                  <TrendingUp className="h-4 w-4 mr-2" />
-                  Screen Stocks
+                <Button 
+                  className="btn-primary w-full md:w-auto" 
+                  onClick={handleScreenStocks}
+                  disabled={isProcessing || !query.trim()}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Screening...
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUp className="h-4 w-4 mr-2" />
+                      Screen Stocks
+                    </>
+                  )}
                 </Button>
+              </div>
+
+              <div className="bg-muted/50 rounded-lg p-6">
+                <h3 className="font-semibold mb-4">Example Queries:</h3>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  <li>• RSI below 30</li>
+                  <li>• Price crossed above SMA 50</li>
+                  <li>• Volume spike 2× SMA 20</li>
+                  <li>• MACD crossed above signal</li>
+                  <li>• CCI greater than 100</li>
+                </ul>
               </div>
 
               <div className="bg-muted/50 rounded-lg p-6">
@@ -84,6 +167,38 @@ const StockScreener = () => {
               </div>
             </div>
           </Card>
+
+          {results.length > 0 && (
+            <Card className="card-elevated p-8">
+              <h3 className="text-xl font-semibold mb-4">
+                Screening Results ({results.length} stocks)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-4">Symbol</th>
+                      <th className="text-right py-2 px-4">Close</th>
+                      <th className="text-right py-2 px-4">Volume</th>
+                      <th className="text-right py-2 px-4">Change %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((stock, idx) => (
+                      <tr key={idx} className="border-b hover:bg-muted/50">
+                        <td className="py-2 px-4 font-medium">{stock.symbol}</td>
+                        <td className="text-right py-2 px-4">${stock.close?.toFixed(2)}</td>
+                        <td className="text-right py-2 px-4">{stock.volume?.toLocaleString()}</td>
+                        <td className={`text-right py-2 px-4 ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {stock.change?.toFixed(2)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 

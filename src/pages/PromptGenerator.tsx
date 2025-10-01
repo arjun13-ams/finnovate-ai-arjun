@@ -4,14 +4,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
-import { Sparkles, Lock } from "lucide-react";
+import { Sparkles, Lock, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 
 const PromptGenerator = () => {
   const [input, setInput] = useState("");
-  const isLoggedIn = false; // This will be connected to auth later
+  const { user, loading } = useAuth();
 
-  if (!isLoggedIn) {
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
     return (
       <div className="min-h-screen flex flex-col">
         <Navbar />

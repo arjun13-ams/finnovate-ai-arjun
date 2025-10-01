@@ -1,1 +1,4 @@
 project_id = "yzaeeosgedmbjlddtqhh"
+
+[functions.stock-screener]
+verify_jwt = true
