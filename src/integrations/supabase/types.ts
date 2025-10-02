@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      llm_usage: {
+        Row: {
+          attempt_count: number | null
+          confidence: string | null
+          created_at: string
+          id: string
+          model_used: string | null
+          parsed_query: Json | null
+          parser_type: string | null
+          success: boolean | null
+          user_id: string | null
+          user_query: string
+        }
+        Insert: {
+          attempt_count?: number | null
+          confidence?: string | null
+          created_at?: string
+          id?: string
+          model_used?: string | null
+          parsed_query?: Json | null
+          parser_type?: string | null
+          success?: boolean | null
+          user_id?: string | null
+          user_query: string
+        }
+        Update: {
+          attempt_count?: number | null
+          confidence?: string | null
+          created_at?: string
+          id?: string
+          model_used?: string | null
+          parsed_query?: Json | null
+          parser_type?: string | null
+          success?: boolean | null
+          user_id?: string | null
+          user_query?: string
+        }
+        Relationships: []
+      }
       ohlcv_last_6_months: {
         Row: {
           close: number

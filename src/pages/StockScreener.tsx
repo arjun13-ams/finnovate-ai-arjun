@@ -14,6 +14,7 @@ const StockScreener = () => {
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [parsedQuery, setParsedQuery] = useState<any>(null);
   const { user, loading } = useAuth();
   const { toast } = useToast();
 
@@ -29,9 +30,9 @@ const StockScreener = () => {
 
     setIsProcessing(true);
     setResults([]);
+    setParsedQuery(null);
 
     try {
-      // Call the stock screener edge function
       const { data, error } = await supabase.functions.invoke('stock-screener', {
         body: { query: query.trim() }
       });
@@ -40,6 +41,7 @@ const StockScreener = () => {
 
       if (data?.results) {
         setResults(data.results);
+        setParsedQuery(data.parsedQuery);
         toast({
           title: "Screening complete",
           description: `Found ${data.results.length} stocks matching your criteria`,
@@ -168,6 +170,36 @@ const StockScreener = () => {
             </div>
           </Card>
 
+          {parsedQuery && (
+            <Card className="card-elevated p-6 mb-8">
+              <h3 className="text-lg font-semibold mb-3">Query Analysis</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Parser:</span>
+                  <span className="ml-2 font-medium capitalize">{parsedQuery.parser}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Confidence:</span>
+                  <span className={`ml-2 font-medium capitalize ${
+                    parsedQuery.confidence === 'high' ? 'text-green-600' : 
+                    parsedQuery.confidence === 'medium' ? 'text-yellow-600' : 
+                    'text-red-600'
+                  }`}>{parsedQuery.confidence}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Category:</span>
+                  <span className="ml-2 font-medium">{parsedQuery.category}</span>
+                </div>
+                {parsedQuery.modelUsed && (
+                  <div className="col-span-2 md:col-span-1">
+                    <span className="text-muted-foreground">Model:</span>
+                    <span className="ml-2 font-medium text-xs">{parsedQuery.modelUsed}</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
           {results.length > 0 && (
             <Card className="card-elevated p-8">
               <h3 className="text-xl font-semibold mb-4">
@@ -181,6 +213,8 @@ const StockScreener = () => {
                       <th className="text-right py-2 px-4">Close</th>
                       <th className="text-right py-2 px-4">Volume</th>
                       <th className="text-right py-2 px-4">Change %</th>
+                      <th className="text-right py-2 px-4">Indicator</th>
+                      <th className="text-right py-2 px-4">Value</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -191,6 +225,12 @@ const StockScreener = () => {
                         <td className="text-right py-2 px-4">{stock.volume?.toLocaleString()}</td>
                         <td className={`text-right py-2 px-4 ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {stock.change?.toFixed(2)}%
+                        </td>
+                        <td className="text-right py-2 px-4 text-xs text-muted-foreground uppercase">
+                          {stock.indicator_name}
+                        </td>
+                        <td className="text-right py-2 px-4 font-medium">
+                          {stock.indicator_value?.toFixed(2)}
                         </td>
                       </tr>
                     ))}
