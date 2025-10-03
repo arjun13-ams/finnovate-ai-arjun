@@ -7,6 +7,109 @@ const corsHeaders = {
 };
 
 const GOOGLE_SHEETS_ID = '1Abo2NBSA5WavSfQSSo4LTBb9IwcNmGAXgqt42wpJGXo';
+const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+
+// ============ FREE MODELS FOR OPENROUTER ============
+const FREE_MODELS = [
+  'x-ai/grok-4-fast:free',
+  'z-ai/glm-4.5-air:free',
+  'deepseek/deepseek-chat-v3.1:free',
+  'meta-llama/llama-4-maverick:free',
+  'google/gemini-2.0-flash-exp:free',
+  'mistralai/mistral-small-3.2-24b-instruct:free',
+  'qwen/qwen3-coder:free',
+  'moonshotai/kimi-k2:free'
+];
+
+// ============ COMPREHENSIVE SYSTEM PROMPT ============
+const SYSTEM_PROMPT = `You are a financial-screening compiler.
+Your ONLY task is to convert the user's natural-language query into a **strict JSON** that exactly matches the schema below.
+The schema is organised into the 11 logical categories (1-11) requested by the product team.
+
+──────────────────────────────────
+GLOBAL RULES
+──────────────────────────────────
+- Output **ONLY** valid JSON.
+- All numeric literals must be numbers, not strings.
+- Time windows: use integer days, e.g. 14, 21, 50.
+- Percentages are decimals: 5 → 0.05.
+- All prices assumed to be in the quote currency of the market.
+- If an indicator is not explicitly mentioned, omit it.
+- If the query is ambiguous, map to the **lowest-numbered** matching category and return "confidence": "low".
+- If no category fits, return category "11" and a free-form string under "llmFallback".
+
+──────────────────────────────────
+ALLOWED ENUM VALUES
+──────────────────────────────────
+op: ">", ">=", "<", "<=", "==", "between", "crossed_above", "crossed_below", "proximity_within"
+window: 5, 10, 14, 20, 21, 50, 100, 200
+ma_type: "sma", "ema", "wma", "hma", "rma", "dema", "tema"
+pattern_type: "bullish_engulfing", "bearish_engulfing", "doji", "hammer", "nr7", "inside_bar", "outside_bar"
+timeframe: "1d", "1w", "1m", "3m", "6m", "1y", "ytd"
+category: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+
+──────────────────────────────────
+JSON SCHEMA
+──────────────────────────────────
+{
+  "category": 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
+  "conditions": [ ... ],
+  "confidence": "high" | "medium" | "low",
+  "llmFallback": string | null
+}
+
+──────────────────────────────────
+CATEGORY DEFINITIONS
+──────────────────────────────────
+
+[1] Indicator Threshold
+   conditions: [{ "category": 1, "indicator": <str>, "window": <int>, "op": <op>, "value": <number|[low,high]> }]
+   Indicators: rsi, stoch, stochrsi, cci, williams_r, awesome_osc, kdj, ultimate_osc, chande_momentum, roc, money_flow_idx, percentage_price_osc, fisher_transform, tsi, schaff_trend_cycle
+
+[2] Price vs Moving Averages
+   conditions: [{ "category": 2, "ma_type": <ma_type>, "window": <int>, "op": "crossed_above"|"crossed_below"|"proximity_within", "value": <number> }]
+   MA Types: sma, ema, wma, hma, rma, tema, dema, kama, zlma
+
+[3] Relative Strength vs Index
+   conditions: [{ "category": 3, "benchmark": <str>, "window": <int>, "op": <op>, "value": <number> }]
+
+[4] Percent Change from Reference
+   conditions: [{ "category": 4, "reference": "1d_low"|"1w_low"|"1m_low"|"52w_low"|"52w_high", "op": <op>, "value": <number> }]
+
+[5] Volume / Volatility
+   conditions: [{ "category": 5, "indicator": "volume"|"volume_sma"|"atr"|"bb_width"|"kc_width"|"ui", "window": <int>, "op": <op>, "value": <number> }]
+
+[6] Chart Patterns & Candles
+   conditions: [{ "category": 6, "pattern_type": <pattern_type>, "direction": "bullish"|"bearish", "window": <int> }]
+
+[7] Breakouts / Swing Conditions
+   conditions: [{ "category": 7, "indicator": "bb_breakout"|"kc_breakout"|"donchian_breakout"|"pivot_break", "direction": "up"|"down", "window": <int> }]
+
+[8] Composite Conditions (AND/OR)
+   conditions: [{ "category": 8, "operator": "and"|"or", "subConditions": [ ... ] }]
+
+[9] Special Screeners
+   conditions: [{ "category": 9, "screener": "base_breakout"|"squeeze_pro"|"turtle_signal"|"adx_trend", "direction": "long"|"short", "window": <int> }]
+
+[10] Time-Based Filters
+   conditions: [{ "category": 10, "timeframe": <timeframe>, "op": <op>, "value": <number> }]
+
+[11] Fallback
+   conditions: [ ]
+   llmFallback: "free-form explanation"
+
+──────────────────────────────────
+EXAMPLES
+──────────────────────────────────
+User: "RSI above 70"
+→ { "category": 1, "conditions": [{"category": 1, "indicator": "rsi", "window": 14, "op": ">", "value": 70 }], "confidence": "high" }
+
+User: "EMA 20 crossed above SMA 50"
+→ { "category": 2, "conditions": [{"category": 2, "ma_type": "ema", "window": 20, "op": "crossed_above", "value": 50 }], "confidence": "high" }
+
+User: "Stocks up 15% from 52-week low"
+→ { "category": 4, "conditions": [{"category": 4, "reference": "52w_low", "op": ">", "value": 0.15 }], "confidence": "high" }
+`;
 
 interface ScreenerCondition {
   category: number;
@@ -24,6 +127,7 @@ interface ParsedQuery {
   parser: string;
   modelUsed?: string | null;
   llmFallback?: string;
+  modelsAttempted?: string[];
 }
 
 serve(async (req) => {
@@ -59,9 +163,9 @@ serve(async (req) => {
     const parsedFilter = await parseQuery(query, userId, supabase);
     console.log('Parsed query:', JSON.stringify(parsedFilter));
 
-    // Step 2: Fetch stock data from Google Sheets
-    const stockData = await fetchGoogleSheetsData();
-    console.log(`Loaded ${stockData.length} stock records`);
+    // Step 2: Fetch stock data from Google Sheets (with caching)
+    const stockData = await fetchGoogleSheetsDataWithCache();
+    console.log(`📊 Loaded ${stockData.length} stock records`);
 
     // Step 3: Screen stocks based on parsed filter
     const results = await screenStocks(stockData, parsedFilter);
@@ -183,110 +287,246 @@ function parseQueryRegex(text: string): { success: boolean; filter?: ParsedQuery
   return { success: false };
 }
 
-async function parseWithAI(text: string): Promise<ParsedQuery> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    return {
-      category: 11,
-      conditions: [],
-      confidence: 'low',
-      parser: 'llm',
-      llmFallback: 'LOVABLE_API_KEY not configured',
-      modelUsed: null,
-    };
+// ============ GOOGLE SHEETS CACHING WITH DENO KV ============
+
+/**
+ * Get cached Google Sheets data from Deno KV
+ * Returns cached data if it exists and is less than 2 hours old
+ */
+async function getCachedData(): Promise<string | null> {
+  try {
+    const kv = await Deno.openKv();
+    
+    // Get both the CSV data and timestamp
+    const [dataEntry, timestampEntry] = await Promise.all([
+      kv.get<string>(['stocks_data_csv']),
+      kv.get<number>(['stocks_data_csv_timestamp'])
+    ]);
+    
+    if (!dataEntry.value || !timestampEntry.value) {
+      console.log('📦 Cache miss: No data found in KV');
+      return null;
+    }
+    
+    const cacheAge = Date.now() - timestampEntry.value;
+    
+    if (cacheAge > CACHE_DURATION) {
+      console.log(`📦 Cache expired: Age ${Math.round(cacheAge / 1000 / 60)} minutes`);
+      return null;
+    }
+    
+    console.log(`📦 Cache hit: Age ${Math.round(cacheAge / 1000 / 60)} minutes`);
+    return dataEntry.value;
+  } catch (error) {
+    console.error('❌ Cache read error:', error);
+    return null;
   }
-
-  const systemPrompt = `You are a financial screening query parser. Convert natural language to JSON.
-
-CATEGORIES:
-1. Indicator Threshold (RSI, CCI, Stochastic, etc.)
-2. Price vs Moving Averages (EMA, SMA crossovers)
-5. Volume/Volatility (ATR, volume spike)
-11. Parse Failure
-
-OUTPUT ONLY valid JSON:
-{
-  "category": <number>,
-  "conditions": [{
-    "category": <number>,
-    "indicator": "<indicator_name>",
-    "window": <number>,
-    "op": "<operator>",
-    "value": <number>
-  }],
-  "confidence": "high|medium|low"
 }
 
-RULES:
-- Percentages as decimals: 5% → 0.05
-- Default windows: RSI=14, CCI=20, SMA=20
-- Operators: >, >=, <, <=, ==, crossed_above, crossed_below
-- If unclear → category 11, confidence "low"`;
-
+/**
+ * Store Google Sheets data in Deno KV cache
+ */
+async function setCachedData(csvData: string): Promise<void> {
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const kv = await Deno.openKv();
+    const timestamp = Date.now();
+    
+    // Store both CSV data and timestamp atomically
+    await Promise.all([
+      kv.set(['stocks_data_csv'], csvData),
+      kv.set(['stocks_data_csv_timestamp'], timestamp)
+    ]);
+    
+    console.log('✅ Cache updated successfully');
+  } catch (error) {
+    console.error('❌ Cache write error:', error);
+  }
+}
+
+/**
+ * Fetch Google Sheets data with caching
+ * Checks cache first, fetches from Google Sheets if cache is stale/missing
+ */
+async function fetchGoogleSheetsDataWithCache(): Promise<any[]> {
+  // Try cache first
+  const cachedCsv = await getCachedData();
+  
+  if (cachedCsv) {
+    console.log('📊 Using cached Google Sheets data');
+    return parseCSV(cachedCsv);
+  }
+  
+  // Cache miss - fetch from Google Sheets
+  console.log('📡 Fetching fresh data from Google Sheets...');
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEETS_ID}/export?format=csv`;
+  const response = await fetch(csvUrl);
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Google Sheets: ${response.statusText}`);
+  }
+  
+  const csvText = await response.text();
+  
+  // Update cache asynchronously (don't wait)
+  setCachedData(csvText).catch(err => console.error('Cache update failed:', err));
+  
+  return parseCSV(csvText);
+}
+
+// ============ OPENROUTER MULTI-MODEL LLM PARSING ============
+
+/**
+ * Try parsing with a single OpenRouter model
+ * Returns parsed result or null if parsing failed
+ */
+async function tryModelWithConfidence(
+  apiKey: string,
+  query: string,
+  model: string
+): Promise<ParsedQuery | null> {
+  try {
+    console.log(`🤖 Trying model: ${model}`);
+    
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://stockscreener.ai',
+        'X-Title': 'Stock Screener AI'
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
+        model,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: text }
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: query }
         ],
         temperature: 0.0,
+        max_tokens: 1000
       }),
     });
-
+    
     if (!response.ok) {
-      throw new Error(`LLM API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error(`❌ Model ${model} failed: ${response.status} - ${errorText}`);
+      return null;
     }
-
+    
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content = data.choices?.[0]?.message?.content;
     
     if (!content) {
-      throw new Error('Empty LLM response');
+      console.error(`❌ Model ${model} returned empty content`);
+      return null;
     }
-
-    const parsed = JSON.parse(content);
+    
+    // Try to parse JSON from content
+    let parsed: any;
+    try {
+      // Extract JSON if wrapped in markdown code blocks
+      const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+      const jsonStr = jsonMatch ? jsonMatch[1] : content;
+      parsed = JSON.parse(jsonStr.trim());
+    } catch (parseError) {
+      console.error(`❌ Model ${model} returned invalid JSON:`, content);
+      return null;
+    }
+    
+    // Validate required fields
+    if (!parsed.category || !parsed.conditions || !parsed.confidence) {
+      console.error(`❌ Model ${model} returned incomplete schema`);
+      return null;
+    }
+    
+    console.log(`✅ Model ${model} parsed successfully with confidence: ${parsed.confidence}`);
+    
     return {
-      ...parsed,
+      category: parsed.category,
+      conditions: parsed.conditions,
+      confidence: parsed.confidence,
+      llmFallback: parsed.llmFallback || null,
       parser: 'llm',
-      modelUsed: 'google/gemini-2.5-flash-lite',
+      modelUsed: model
     };
+    
   } catch (error) {
-    console.error('LLM parse error:', error);
+    console.error(`❌ Model ${model} error:`, error);
+    return null;
+  }
+}
+
+/**
+ * Parse query using OpenRouter with multi-model fallback
+ * Tries each free model until one returns high confidence
+ */
+async function parseWithLLMs(query: string): Promise<ParsedQuery> {
+  const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
+  
+  if (!OPENROUTER_API_KEY) {
+    console.error('❌ OPENROUTER_API_KEY not configured');
     return {
       category: 11,
       conditions: [],
       confidence: 'low',
       parser: 'llm',
-      llmFallback: 'Failed to parse query',
+      llmFallback: 'OPENROUTER_API_KEY not configured',
       modelUsed: null,
+      modelsAttempted: []
     };
   }
+  
+  const modelsAttempted: string[] = [];
+  
+  // Try each model in sequence
+  for (const model of FREE_MODELS) {
+    modelsAttempted.push(model);
+    
+    const result = await tryModelWithConfidence(OPENROUTER_API_KEY, query, model);
+    
+    if (result && result.confidence === 'high') {
+      console.log(`🎯 High confidence achieved with ${model}`);
+      return {
+        ...result,
+        modelsAttempted
+      };
+    }
+  }
+  
+  // All models failed or returned low/medium confidence
+  console.log('⚠️ No model achieved high confidence');
+  return {
+    category: 11,
+    conditions: [],
+    confidence: 'low',
+    parser: 'llm',
+    llmFallback: 'Could not parse query with high confidence after trying all available models',
+    modelUsed: null,
+    modelsAttempted
+  };
 }
 
 async function parseQuery(text: string, userId: string | undefined, supabase: any): Promise<ParsedQuery> {
-  // Try regex first
+  console.log(`🔍 Parsing query: "${text}"`);
+  
+  // Try regex first (fast, free, covers ~70% of queries)
   const regexResult = parseQueryRegex(text);
   
   let parsedFilter: ParsedQuery;
   
   if (regexResult.success && regexResult.filter) {
+    console.log('✅ Regex parser succeeded');
     parsedFilter = regexResult.filter;
   } else {
-    // Fallback to LLM
-    parsedFilter = await parseWithAI(text);
+    // Fallback to OpenRouter multi-model LLM
+    console.log('⚡ Regex failed, trying OpenRouter LLMs...');
+    parsedFilter = await parseWithLLMs(text);
   }
 
-  // Track LLM usage if user is authenticated
-  if (userId) {
+  // Track LLM usage if user is authenticated and LLM was used
+  if (userId && parsedFilter.parser === 'llm') {
     try {
+      const attemptCount = parsedFilter.modelsAttempted?.length || 0;
+      
       await supabase.from('llm_usage').insert({
         user_id: userId,
         user_query: text,
@@ -295,28 +535,19 @@ async function parseQuery(text: string, userId: string | undefined, supabase: an
         confidence: parsedFilter.confidence,
         parser_type: parsedFilter.parser,
         success: parsedFilter.category !== 11,
+        attempt_count: attemptCount
       });
+      
+      console.log(`📊 LLM usage tracked: ${attemptCount} models attempted`);
     } catch (error) {
-      console.error('Failed to track LLM usage:', error);
+      console.error('❌ Failed to track LLM usage:', error);
     }
   }
 
   return parsedFilter;
 }
 
-// ============ GOOGLE SHEETS DATA FETCHING ============
-
-async function fetchGoogleSheetsData(): Promise<any[]> {
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEETS_ID}/export?format=csv`;
-  const response = await fetch(csvUrl);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch Google Sheets: ${response.statusText}`);
-  }
-
-  const csvText = await response.text();
-  return parseCSV(csvText);
-}
+// ============ CSV PARSING ============
 
 function parseCSV(csvText: string): any[] {
   const lines = csvText.trim().split('\n');
