@@ -175,7 +175,11 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         results,
-        parsedQuery: parsedFilter,
+        parsedQuery: {
+          ...parsedFilter,
+          userQuery: query,
+          technicalQuery: parsedFilter.conditions
+        },
         totalMatched: results.length,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

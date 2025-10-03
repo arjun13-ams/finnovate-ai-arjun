@@ -172,28 +172,45 @@ const StockScreener = () => {
 
           {parsedQuery && (
             <Card className="card-elevated p-6 mb-8">
-              <h3 className="text-lg font-semibold mb-3">Query Analysis</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Parser:</span>
-                  <span className="ml-2 font-medium capitalize">{parsedQuery.parser}</span>
+              <h3 className="text-lg font-semibold mb-4">Query Analysis</h3>
+              
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Parser:</span>
+                    <span className="ml-2 font-medium capitalize">{parsedQuery.parser}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Confidence:</span>
+                    <span className={`ml-2 font-medium capitalize ${
+                      parsedQuery.confidence === 'high' ? 'text-green-600' : 
+                      parsedQuery.confidence === 'medium' ? 'text-yellow-600' : 
+                      'text-red-600'
+                    }`}>{parsedQuery.confidence}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Category:</span>
+                    <span className="ml-2 font-medium">{parsedQuery.category}</span>
+                  </div>
+                  {parsedQuery.modelUsed && (
+                    <div className="col-span-2 md:col-span-1">
+                      <span className="text-muted-foreground">Model:</span>
+                      <span className="ml-2 font-medium text-xs">{parsedQuery.modelUsed}</span>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Confidence:</span>
-                  <span className={`ml-2 font-medium capitalize ${
-                    parsedQuery.confidence === 'high' ? 'text-green-600' : 
-                    parsedQuery.confidence === 'medium' ? 'text-yellow-600' : 
-                    'text-red-600'
-                  }`}>{parsedQuery.confidence}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Category:</span>
-                  <span className="ml-2 font-medium">{parsedQuery.category}</span>
-                </div>
-                {parsedQuery.modelUsed && (
-                  <div className="col-span-2 md:col-span-1">
-                    <span className="text-muted-foreground">Model:</span>
-                    <span className="ml-2 font-medium text-xs">{parsedQuery.modelUsed}</span>
+
+                {parsedQuery.userQuery && (
+                  <div className="pt-3 border-t">
+                    <span className="text-muted-foreground text-sm font-medium">User Input:</span>
+                    <p className="mt-1 text-sm bg-muted/30 p-3 rounded">{parsedQuery.userQuery}</p>
+                  </div>
+                )}
+
+                {parsedQuery.technicalQuery && (
+                  <div className="pt-3 border-t">
+                    <span className="text-muted-foreground text-sm font-medium">Technical Query:</span>
+                    <pre className="mt-1 text-xs bg-muted/30 p-3 rounded overflow-x-auto">{JSON.stringify(parsedQuery.technicalQuery, null, 2)}</pre>
                   </div>
                 )}
               </div>
