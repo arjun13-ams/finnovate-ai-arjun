@@ -155,19 +155,33 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader! } } }
     );
 
+    // Service role client for server-side ops (cache + logging)
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
     // Get user ID
     const { data: { user } } = await supabase.auth.getUser();
     const userId = user?.id;
 
     // Step 1: Parse query (regex first, then LLM fallback)
-    const parsedFilter = await parseQuery(query, userId, supabase);
+    const parsedFilter = await parseQuery(query, userId, supabaseAdmin);
     console.log('Parsed query:', JSON.stringify(parsedFilter));
 
     // Step 2: Fetch stock data from Google Sheets (with caching)
-    const stockData = await fetchGoogleSheetsDataWithCache();
+    const stockData = await fetchGoogleSheetsDataWithCache(supabaseAdmin);
     console.log(`📊 Loaded ${stockData.length} stock records`);
 
-    // Step 3: Screen stocks based on parsed filter
+    // Step 3: Compute dataset stats
+    const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
+    const dateNumbers = stockData
+      .map((r: any) => new Date(r.date).getTime())
+      .filter((t: number) => !Number.isNaN(t));
+    const dateFrom = dateNumbers.length ? new Date(Math.min(...dateNumbers)).toISOString().slice(0, 10) : null;
+    const dateTo = dateNumbers.length ? new Date(Math.max(...dateNumbers)).toISOString().slice(0, 10) : null;
+
+    // Step 4: Screen stocks based on parsed filter
     const results = await screenStocks(stockData, parsedFilter);
     console.log('Found results:', results.length);
 
@@ -179,6 +193,12 @@ serve(async (req) => {
           ...parsedFilter,
           userQuery: query,
           technicalQuery: parsedFilter.conditions
+        },
+        datasetStats: {
+          uniqueSymbols,
+          recordCount: stockData.length,
+          dateFrom,
+          dateTo
         },
         totalMatched: results.length,
       }),
@@ -291,89 +311,89 @@ function parseQueryRegex(text: string): { success: boolean; filter?: ParsedQuery
   return { success: false };
 }
 
-// ============ GOOGLE SHEETS CACHING WITH DENO KV ============
+// ============ GOOGLE SHEETS CACHING WITH DATABASE (kv_cache) ============
 
 /**
- * Get cached Google Sheets data from Deno KV
- * Returns cached data if it exists and is less than 2 hours old
+ * Get cached Google Sheets data from DB (kv_cache table)
+ * Returns cached data if it exists and is less than CACHE_DURATION old
  */
-async function getCachedData(): Promise<string | null> {
+async function getCachedDataDB(supabaseAdmin: any): Promise<string | null> {
   try {
-    const kv = await Deno.openKv();
-    
-    // Get both the CSV data and timestamp
-    const [dataEntry, timestampEntry] = await Promise.all([
-      kv.get<string>(['stocks_data_csv']),
-      kv.get<number>(['stocks_data_csv_timestamp'])
-    ]);
-    
-    if (!dataEntry.value || !timestampEntry.value) {
-      console.log('📦 Cache miss: No data found in KV');
+    const { data, error } = await supabaseAdmin
+      .from('kv_cache')
+      .select('value, updated_at')
+      .eq('key', 'stocks_data_csv')
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('❌ Cache read DB error:', error);
       return null;
     }
-    
-    const cacheAge = Date.now() - timestampEntry.value;
-    
+
+    if (!data) {
+      console.log('📦 Cache miss: No row in kv_cache');
+      return null;
+    }
+
+    const cacheAge = Date.now() - new Date(data.updated_at).getTime();
     if (cacheAge > CACHE_DURATION) {
-      console.log(`📦 Cache expired: Age ${Math.round(cacheAge / 1000 / 60)} minutes`);
+      console.log(`📦 Cache expired (DB): Age ${Math.round(cacheAge / 60000)} minutes`);
       return null;
     }
-    
-    console.log(`📦 Cache hit: Age ${Math.round(cacheAge / 1000 / 60)} minutes`);
-    return dataEntry.value;
+
+    console.log(`📦 Cache hit (DB): Age ${Math.round(cacheAge / 60000)} minutes`);
+    return data.value as string;
   } catch (error) {
-    console.error('❌ Cache read error:', error);
+    console.error('❌ Cache read DB exception:', error);
     return null;
   }
 }
 
 /**
- * Store Google Sheets data in Deno KV cache
+ * Store Google Sheets data in DB cache (kv_cache)
  */
-async function setCachedData(csvData: string): Promise<void> {
+async function setCachedDataDB(supabaseAdmin: any, csvData: string): Promise<void> {
   try {
-    const kv = await Deno.openKv();
-    const timestamp = Date.now();
-    
-    // Store both CSV data and timestamp atomically
-    await Promise.all([
-      kv.set(['stocks_data_csv'], csvData),
-      kv.set(['stocks_data_csv_timestamp'], timestamp)
-    ]);
-    
-    console.log('✅ Cache updated successfully');
+    const { error } = await supabaseAdmin
+      .from('kv_cache')
+      .upsert({ key: 'stocks_data_csv', value: csvData })
+      .select('key');
+
+    if (error) {
+      console.error('❌ Cache write DB error:', error);
+      return;
+    }
+
+    console.log('✅ Cache (DB) updated successfully');
   } catch (error) {
-    console.error('❌ Cache write error:', error);
+    console.error('❌ Cache write DB exception:', error);
   }
 }
 
 /**
- * Fetch Google Sheets data with caching
+ * Fetch Google Sheets data with caching using DB
  * Checks cache first, fetches from Google Sheets if cache is stale/missing
  */
-async function fetchGoogleSheetsDataWithCache(): Promise<any[]> {
+async function fetchGoogleSheetsDataWithCache(supabaseAdmin: any): Promise<any[]> {
   // Try cache first
-  const cachedCsv = await getCachedData();
-  
+  const cachedCsv = await getCachedDataDB(supabaseAdmin);
   if (cachedCsv) {
-    console.log('📊 Using cached Google Sheets data');
+    console.log('📊 Using cached Google Sheets data (DB)');
     return parseCSV(cachedCsv);
   }
-  
+
   // Cache miss - fetch from Google Sheets
   console.log('📡 Fetching fresh data from Google Sheets...');
   const csvUrl = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEETS_ID}/export?format=csv`;
   const response = await fetch(csvUrl);
-  
   if (!response.ok) {
-    throw new Error(`Failed to fetch Google Sheets: ${response.statusText}`);
+    throw new Error(`Failed to fetch Google Sheets: ${response.status} ${response.statusText}`);
   }
-  
   const csvText = await response.text();
-  
-  // Update cache asynchronously (don't wait)
-  setCachedData(csvText).catch(err => console.error('Cache update failed:', err));
-  
+
+  // Update cache asynchronously (no await to keep response fast)
+  setCachedDataDB(supabaseAdmin, csvText).catch((err) => console.error('Cache update failed (DB):', err));
+
   return parseCSV(csvText);
 }
 
@@ -509,7 +529,7 @@ async function parseWithLLMs(query: string): Promise<ParsedQuery> {
   };
 }
 
-async function parseQuery(text: string, userId: string | undefined, supabase: any): Promise<ParsedQuery> {
+async function parseQuery(text: string, userId: string | undefined, supabaseAdmin: any): Promise<ParsedQuery> {
   console.log(`🔍 Parsing query: "${text}"`);
   
   // Try regex first (fast, free, covers ~70% of queries)
@@ -531,7 +551,7 @@ async function parseQuery(text: string, userId: string | undefined, supabase: an
     try {
       const attemptCount = parsedFilter.modelsAttempted?.length || 0;
       
-      await supabase.from('llm_usage').insert({
+      await supabaseAdmin.from('llm_usage').insert({
         user_id: userId,
         user_query: text,
         parsed_query: parsedFilter,

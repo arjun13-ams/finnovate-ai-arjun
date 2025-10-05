@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      kv_cache: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
+      }
       llm_usage: {
         Row: {
           attempt_count: number | null

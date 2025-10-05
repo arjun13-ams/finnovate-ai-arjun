@@ -15,6 +15,7 @@ const StockScreener = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [parsedQuery, setParsedQuery] = useState<any>(null);
+  const [datasetStats, setDatasetStats] = useState<any>(null);
   const { user, loading } = useAuth();
   const { toast } = useToast();
 
@@ -31,6 +32,7 @@ const StockScreener = () => {
     setIsProcessing(true);
     setResults([]);
     setParsedQuery(null);
+    setDatasetStats(null);
 
     try {
       const { data, error } = await supabase.functions.invoke('stock-screener', {
@@ -42,6 +44,7 @@ const StockScreener = () => {
       if (data?.results) {
         setResults(data.results);
         setParsedQuery(data.parsedQuery);
+        setDatasetStats(data.datasetStats || null);
         toast({
           title: "Screening complete",
           description: `Found ${data.results.length} stocks matching your criteria`,
@@ -213,6 +216,30 @@ const StockScreener = () => {
                     <pre className="mt-1 text-xs bg-muted/30 p-3 rounded overflow-x-auto">{JSON.stringify(parsedQuery.technicalQuery, null, 2)}</pre>
                   </div>
                 )}
+              </div>
+            </Card>
+          )}
+
+          {datasetStats && (
+            <Card className="card-elevated p-6 mb-8">
+              <h3 className="text-lg font-semibold mb-3">Data Snapshot</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Unique Stocks:</span>
+                  <span className="ml-2 font-medium">{datasetStats.uniqueSymbols}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Records:</span>
+                  <span className="ml-2 font-medium">{datasetStats.recordCount}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">From:</span>
+                  <span className="ml-2 font-medium">{datasetStats.dateFrom || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">To:</span>
+                  <span className="ml-2 font-medium">{datasetStats.dateTo || '—'}</span>
+                </div>
               </div>
             </Card>
           )}
