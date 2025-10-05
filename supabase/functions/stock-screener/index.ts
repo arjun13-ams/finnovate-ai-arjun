@@ -136,17 +136,18 @@ serve(async (req) => {
   }
 
   try {
-    const { query } = await req.json();
+    const { query, statsOnly } = await req.json();
     const authHeader = req.headers.get('Authorization');
     
-    if (!query || typeof query !== 'string') {
+    // Validate query only if not a stats-only request
+    if (!statsOnly && (!query || typeof query !== 'string')) {
       return new Response(
         JSON.stringify({ error: 'Query is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Processing screener query:', query);
+    console.log('📥 Request:', statsOnly ? 'Stats only' : `Query: ${query}`);
 
     // Initialize Supabase client
     const supabase = createClient(
@@ -165,15 +166,38 @@ serve(async (req) => {
     const { data: { user } } = await supabase.auth.getUser();
     const userId = user?.id;
 
+    // Fetch stock data from Google Sheets (with caching)
+    const stockData = await fetchGoogleSheetsDataWithCache(supabaseAdmin);
+    console.log(`📊 Loaded ${stockData.length} stock records`);
+
+    // If stats-only request, return just the dataset stats
+    if (statsOnly) {
+      const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
+      const dateNumbers = stockData
+        .map((r: any) => new Date(r.date).getTime())
+        .filter((t: number) => !Number.isNaN(t));
+      const dateFrom = dateNumbers.length ? new Date(Math.min(...dateNumbers)).toISOString().slice(0, 10) : null;
+      const dateTo = dateNumbers.length ? new Date(Math.max(...dateNumbers)).toISOString().slice(0, 10) : null;
+
+      console.log('✅ Returning stats only');
+      return new Response(
+        JSON.stringify({
+          datasetStats: {
+            uniqueSymbols,
+            recordCount: stockData.length,
+            dateFrom,
+            dateTo
+          }
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Step 1: Parse query (regex first, then LLM fallback)
     const parsedFilter = await parseQuery(query, userId, supabaseAdmin);
     console.log('Parsed query:', JSON.stringify(parsedFilter));
 
-    // Step 2: Fetch stock data from Google Sheets (with caching)
-    const stockData = await fetchGoogleSheetsDataWithCache(supabaseAdmin);
-    console.log(`📊 Loaded ${stockData.length} stock records`);
-
-    // Step 3: Compute dataset stats
+    // Step 2: Compute dataset stats
     const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
     const dateNumbers = stockData
       .map((r: any) => new Date(r.date).getTime())
@@ -181,7 +205,7 @@ serve(async (req) => {
     const dateFrom = dateNumbers.length ? new Date(Math.min(...dateNumbers)).toISOString().slice(0, 10) : null;
     const dateTo = dateNumbers.length ? new Date(Math.max(...dateNumbers)).toISOString().slice(0, 10) : null;
 
-    // Step 4: Screen stocks based on parsed filter
+    // Step 3: Screen stocks based on parsed filter
     const results = await screenStocks(stockData, parsedFilter);
     console.log('Found results:', results.length);
 

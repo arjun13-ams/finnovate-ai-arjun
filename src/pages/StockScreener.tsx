@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
-import { TrendingUp, Lock, Loader2 } from "lucide-react";
+import { Sparkles, Lock, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,8 +16,35 @@ const StockScreener = () => {
   const [results, setResults] = useState<any[]>([]);
   const [parsedQuery, setParsedQuery] = useState<any>(null);
   const [datasetStats, setDatasetStats] = useState<any>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
   const { user, loading } = useAuth();
   const { toast } = useToast();
+
+  // Fetch dataset stats on page load
+  useEffect(() => {
+    if (user && !isLoadingStats && !datasetStats) {
+      fetchDatasetStats();
+    }
+  }, [user]);
+
+  const fetchDatasetStats = async () => {
+    setIsLoadingStats(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('stock-screener', {
+        body: { statsOnly: true }
+      });
+
+      if (error) throw error;
+
+      if (data?.datasetStats) {
+        setDatasetStats(data.datasetStats);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch dataset stats:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
 
   const handleScreenStocks = async () => {
     if (!query.trim()) {
@@ -88,7 +115,7 @@ const StockScreener = () => {
             <div className="space-y-2">
               <h2 className="text-2xl font-bold">Login Required</h2>
               <p className="text-muted-foreground">
-                Please sign in to access the Stock Screener
+                Please sign in to access Screener.AI
               </p>
             </div>
             <Link to="/auth">
@@ -112,8 +139,8 @@ const StockScreener = () => {
         <div className="container mx-auto max-w-4xl">
           <div className="text-center space-y-4 mb-12">
             <div className="inline-flex items-center space-x-2 bg-accent/10 text-accent px-4 py-2 rounded-full text-sm font-medium">
-              <TrendingUp className="h-4 w-4" />
-              <span>Stock Screener</span>
+              <Sparkles className="h-4 w-4" />
+              <span>Screener.AI</span>
             </div>
             <h1 className="text-4xl md:text-5xl font-bold">
               AI-Powered Stock Screening
@@ -123,6 +150,33 @@ const StockScreener = () => {
             </p>
           </div>
 
+          {datasetStats && (
+            <Card className="card-elevated p-6 mb-8">
+              <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-accent" />
+                Data Snapshot
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Unique Stocks:</span>
+                  <span className="ml-2 font-medium">{datasetStats.uniqueSymbols}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Records:</span>
+                  <span className="ml-2 font-medium">{datasetStats.recordCount}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">From:</span>
+                  <span className="ml-2 font-medium">{datasetStats.dateFrom || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">To:</span>
+                  <span className="ml-2 font-medium">{datasetStats.dateTo || '—'}</span>
+                </div>
+              </div>
+            </Card>
+          )}
+
           <Card className="card-elevated p-8 mb-8">
             <div className="space-y-6">
               <div className="space-y-2">
@@ -131,6 +185,12 @@ const StockScreener = () => {
                   placeholder="Example: RSI below 30 and volume spike 2x SMA 20"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleScreenStocks();
+                    }
+                  }}
                   rows={4}
                 />
                 <Button 
@@ -145,7 +205,7 @@ const StockScreener = () => {
                     </>
                   ) : (
                     <>
-                      <TrendingUp className="h-4 w-4 mr-2" />
+                      <Sparkles className="h-4 w-4 mr-2" />
                       Screen Stocks
                     </>
                   )}
@@ -220,29 +280,6 @@ const StockScreener = () => {
             </Card>
           )}
 
-          {datasetStats && (
-            <Card className="card-elevated p-6 mb-8">
-              <h3 className="text-lg font-semibold mb-3">Data Snapshot</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Unique Stocks:</span>
-                  <span className="ml-2 font-medium">{datasetStats.uniqueSymbols}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Records:</span>
-                  <span className="ml-2 font-medium">{datasetStats.recordCount}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">From:</span>
-                  <span className="ml-2 font-medium">{datasetStats.dateFrom || '—'}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">To:</span>
-                  <span className="ml-2 font-medium">{datasetStats.dateTo || '—'}</span>
-                </div>
-              </div>
-            </Card>
-          )}
 
           {results.length > 0 && (
             <Card className="card-elevated p-8">

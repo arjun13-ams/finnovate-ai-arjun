@@ -20,7 +20,7 @@ const products = [
     description: "AI-powered video summaries with key points and timelines",
   },
   {
-    title: "Stock Screener",
+    title: "Screener.AI",
     href: "/stock-screener",
     description: "Intelligent stock filtering with natural language queries",
   },
