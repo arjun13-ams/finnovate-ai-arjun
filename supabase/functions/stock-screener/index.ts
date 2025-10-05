@@ -571,6 +571,7 @@ async function parseQuery(text: string, userId: string | undefined, supabaseAdmi
   }
 
   // Track LLM usage if user is authenticated and LLM was used
+  console.log(`User ID: ${userId}, Parser Type: ${parsedFilter.parser}`);
   if (userId && parsedFilter.parser === 'llm') {
     try {
       const attemptCount = parsedFilter.modelsAttempted?.length || 0;
