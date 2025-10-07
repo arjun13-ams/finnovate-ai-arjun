@@ -259,77 +259,277 @@ function normalizeOperator(op: string): string {
 function parseQueryRegex(text: string): { success: boolean; filter?: ParsedQuery } {
   const lowerText = text.toLowerCase();
 
-  // RSI pattern
+  // Helper to build a successful response
+  const ok = (category: number, condition: any): { success: boolean; filter: ParsedQuery } => ({
+    success: true,
+    filter: {
+      category,
+      conditions: [condition],
+      confidence: 'high',
+      parser: 'regex',
+    },
+  });
+
+  // Category 1: Indicator thresholds -------------------------------------------------
+  // RSI
   const rsiMatch = /\brsi\s*(?:(\d+))?\s*(>|>=|<|<=|above|below|greater than|less than)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
   if (rsiMatch) {
     const window = rsiMatch[1] ? parseInt(rsiMatch[1]) : 14;
     const op = normalizeOperator(rsiMatch[2]);
     const value = parseFloat(rsiMatch[3]);
-    
-    return {
-      success: true,
-      filter: {
-        category: 1,
-        conditions: [{ category: 1, indicator: 'rsi', window, op, value }],
-        confidence: 'high',
-        parser: 'regex',
-      },
-    };
+    return ok(1, { category: 1, indicator: 'rsi', window, op, value });
   }
 
-  // Volume spike pattern
-  const volumeMatch = /\bvolume\s+spike\s+(\d+(?:\.\d+)?)\s*[x×]?\s*sma\s+(\d+)/i.exec(lowerText);
-  if (volumeMatch) {
-    const value = parseFloat(volumeMatch[1]);
-    const window = parseInt(volumeMatch[2]);
-    
-    return {
-      success: true,
-      filter: {
-        category: 5,
-        conditions: [{ category: 5, indicator: 'volume_sma', window, op: '>', value }],
-        confidence: 'high',
-        parser: 'regex',
-      },
-    };
+  // Stochastic
+  const stochMatch = /\bstoch(?:astic)?\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (stochMatch) {
+    const op = normalizeOperator(stochMatch[1]);
+    const value = parseFloat(stochMatch[2]);
+    return ok(1, { category: 1, indicator: 'stoch', window: 14, op, value });
   }
 
-  // Price vs MA pattern
-  const priceMAMatch = /\b(?:price|close)?\s*(crossed\s+above|crossed\s+below|above|below)\s+(sma|ema)\s+(\d+)/i.exec(lowerText);
-  if (priceMAMatch) {
-    const op = priceMAMatch[1].includes('crossed') 
-      ? (priceMAMatch[1].includes('above') ? 'crossed_above' : 'crossed_below')
-      : (priceMAMatch[1].includes('above') ? '>' : '<');
-    const maType = priceMAMatch[2];
-    const window = parseInt(priceMAMatch[3]);
-    
-    return {
-      success: true,
-      filter: {
-        category: 2,
-        conditions: [{ category: 2, ma_type: maType, window, op }],
-        confidence: 'high',
-        parser: 'regex',
-      },
-    };
+  // Stoch RSI between
+  const stochRsiBetween = /\bstoch\s*rsi\s*(?:\(?(\d+)\)?)?\s*(\d+(?:\.\d+)?)\s*[-to]+\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (stochRsiBetween) {
+    const window = stochRsiBetween[1] ? parseInt(stochRsiBetween[1]) : 14;
+    const low = parseFloat(stochRsiBetween[2]);
+    const high = parseFloat(stochRsiBetween[3]);
+    return ok(1, { category: 1, indicator: 'stochrsi', window, op: 'between', value: [low, high] as any });
   }
 
-  // CCI pattern
+  // CCI
   const cciMatch = /\bcci\s*(?:(\d+))?\s*(>|>=|<|<=|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
   if (cciMatch) {
     const window = cciMatch[1] ? parseInt(cciMatch[1]) : 20;
     const op = normalizeOperator(cciMatch[2]);
     const value = parseFloat(cciMatch[3]);
-    
-    return {
-      success: true,
-      filter: {
-        category: 1,
-        conditions: [{ category: 1, indicator: 'cci', window, op, value }],
-        confidence: 'high',
-        parser: 'regex',
-      },
-    };
+    return ok(1, { category: 1, indicator: 'cci', window, op, value });
+  }
+
+  // Williams %R
+  const wrMatch = /\bwilliams\s*%?r\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (wrMatch) {
+    const op = normalizeOperator(wrMatch[1]);
+    const value = parseFloat(wrMatch[2]);
+    return ok(1, { category: 1, indicator: 'williams_r', window: 14, op, value });
+  }
+
+  // Awesome Oscillator (AO)
+  const aoMatch = /\b(?:awesome\s+oscillator|ao)\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (aoMatch) {
+    const op = normalizeOperator(aoMatch[1]);
+    const value = parseFloat(aoMatch[2]);
+    return ok(1, { category: 1, indicator: 'awesome_osc', window: 5, op, value });
+  }
+
+  // KDJ
+  const kdjMatch = /\bkdj\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (kdjMatch) {
+    const op = normalizeOperator(kdjMatch[1]);
+    const value = parseFloat(kdjMatch[2]);
+    return ok(1, { category: 1, indicator: 'kdj', window: 14, op, value });
+  }
+
+  // Ultimate Oscillator (UO)
+  const uoMatch = /\b(?:ultimate\s+oscillator|uo)\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (uoMatch) {
+    const op = normalizeOperator(uoMatch[1]);
+    const value = parseFloat(uoMatch[2]);
+    return ok(1, { category: 1, indicator: 'ultimate_osc', window: 14, op, value });
+  }
+
+  // Chande Momentum (CMO)
+  const cmoMatch = /\b(?:chande\s+momentum|cmo)\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (cmoMatch) {
+    const op = normalizeOperator(cmoMatch[1]);
+    const value = parseFloat(cmoMatch[2]);
+    return ok(1, { category: 1, indicator: 'chande_momentum', window: 14, op, value });
+  }
+
+  // ROC
+  const rocMatch = /\broc\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (rocMatch) {
+    const op = normalizeOperator(rocMatch[1]);
+    let value = parseFloat(rocMatch[2]);
+    if (rocMatch[3] === '%') value = value / 100;
+    return ok(1, { category: 1, indicator: 'roc', window: 14, op, value });
+  }
+
+  // MFI
+  const mfiMatch = /\bmfi\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (mfiMatch) {
+    const op = normalizeOperator(mfiMatch[1]);
+    const value = parseFloat(mfiMatch[2]);
+    return ok(1, { category: 1, indicator: 'money_flow_idx', window: 14, op, value });
+  }
+
+  // PPO
+  const ppoMatch = /\bppo\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (ppoMatch) {
+    const op = normalizeOperator(ppoMatch[1]);
+    let value = parseFloat(ppoMatch[2]);
+    if (ppoMatch[3] === '%') value = value / 100;
+    return ok(1, { category: 1, indicator: 'percentage_price_osc', window: 14, op, value });
+  }
+
+  // Fisher Transform cross
+  const fisherMatch = /\bfisher\s*transform\b.*?crossed\s+(above|below)\s*(-?\d+(?:\.\d+)?|zero)/i.exec(lowerText);
+  if (fisherMatch) {
+    const direction = fisherMatch[1].toLowerCase();
+    const op = direction === 'above' ? 'crossed_above' : 'crossed_below';
+    const valueRaw = fisherMatch[2].toLowerCase();
+    const value = valueRaw === 'zero' ? 0 : parseFloat(valueRaw);
+    return ok(1, { category: 1, indicator: 'fisher_transform', window: 9, op, value });
+  }
+
+  // TSI
+  const tsiMatch = /\btsi\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (tsiMatch) {
+    const op = normalizeOperator(tsiMatch[1]);
+    const value = parseFloat(tsiMatch[2]);
+    return ok(1, { category: 1, indicator: 'tsi', window: 25, op, value });
+  }
+
+  // STC
+  const stcMatch = /\bstc\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (stcMatch) {
+    const op = normalizeOperator(stcMatch[1]);
+    const value = parseFloat(stcMatch[2]);
+    return ok(1, { category: 1, indicator: 'schaff_trend_cycle', window: 10, op, value });
+  }
+
+  // Category 2: Price vs Moving Averages -------------------------------------
+  const priceMAMatch = /\b(?:price|close)?\s*(crossed\s+above|crossed\s+below|above|below)\s+(sma|ema|wma|hma|kama|dema|tema|zlma)\s+(\d+)/i.exec(lowerText);
+  if (priceMAMatch) {
+    const op = priceMAMatch[1].includes('crossed')
+      ? (priceMAMatch[1].includes('above') ? 'crossed_above' : 'crossed_below')
+      : (priceMAMatch[1].includes('above') ? '>' : '<');
+    const maType = priceMAMatch[2];
+    const window = parseInt(priceMAMatch[3]);
+    return ok(2, { category: 2, ma_type: maType, window, op });
+  }
+
+  const priceWithinMA = /\bwithin\s+(\d+(?:\.\d+)?)%?\s+of\s+(sma|ema|wma|hma|kama|dema|tema|zlma)\s+(\d+)/i.exec(lowerText);
+  if (priceWithinMA) {
+    const value = parseFloat(priceWithinMA[1]);
+    const maType = priceWithinMA[2];
+    const window = parseInt(priceWithinMA[3]);
+    return ok(2, { category: 2, ma_type: maType, window, op: 'proximity_within', value });
+  }
+
+  // Category 5: Volume / Volatility ------------------------------------------
+  // Volume spike vs SMA
+  const volumeMatch = /\bvolume\s+spike\s+(\d+(?:\.\d+)?)\s*[x×]?\s*sma\s+(\d+)/i.exec(lowerText);
+  if (volumeMatch) {
+    const value = parseFloat(volumeMatch[1]);
+    const window = parseInt(volumeMatch[2]);
+    return ok(5, { category: 5, indicator: 'volume_sma', window, op: '>', value });
+  }
+
+  // ATR
+  const atrMatch = /\batr\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (atrMatch) {
+    const window = atrMatch[1] ? parseInt(atrMatch[1]) : 14;
+    const op = normalizeOperator(atrMatch[2]);
+    let value = parseFloat(atrMatch[3]);
+    if (atrMatch[4] === '%') value = value / 100;
+    return ok(5, { category: 5, indicator: 'atr', window, op, value });
+  }
+
+  // BB width
+  const bbwMatch = /\bbb\s*width\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (bbwMatch) {
+    const window = bbwMatch[1] ? parseInt(bbwMatch[1]) : 20;
+    const op = normalizeOperator(bbwMatch[2]);
+    let value = parseFloat(bbwMatch[3]);
+    if (bbwMatch[4] === '%') value = value / 100;
+    return ok(5, { category: 5, indicator: 'bb_width', window, op, value });
+  }
+
+  // KC width
+  const kcwMatch = /\bkc\s*width\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (kcwMatch) {
+    const window = kcwMatch[1] ? parseInt(kcwMatch[1]) : 20;
+    const op = normalizeOperator(kcwMatch[2]);
+    let value = parseFloat(kcwMatch[3]);
+    if (kcwMatch[4] === '%') value = value / 100;
+    return ok(5, { category: 5, indicator: 'kc_width', window, op, value });
+  }
+
+  // Ulcer Index
+  const uiMatch = /\bulcer\s*index\b\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (uiMatch) {
+    const window = uiMatch[1] ? parseInt(uiMatch[1]) : 14;
+    const op = normalizeOperator(uiMatch[2]);
+    const value = parseFloat(uiMatch[3]);
+    return ok(5, { category: 5, indicator: 'ui', window, op, value });
+  }
+
+  // Category 6: Candles & patterns -------------------------------------------
+  if (/\bbullish\s+engulfing\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'bullish_engulfing', window: 1, op: '==' });
+  }
+  if (/\bbearish\s+engulfing\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'bearish_engulfing', window: 1, op: '==' });
+  }
+  if (/\bdoji\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'doji', window: 1, op: '==' });
+  }
+  if (/\bhammer\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'hammer', window: 1, op: '==' });
+  }
+  if (/\bnr7\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'nr7', window: 1, op: '==' });
+  }
+  if (/\binside\s+bar\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'inside_bar', window: 1, op: '==' });
+  }
+  if (/\boutside\s+bar\b/i.test(lowerText)) {
+    return ok(6, { category: 6, pattern_type: 'outside_bar', window: 1, op: '==' });
+  }
+
+  // Category 7: Breakouts -----------------------------------------------------
+  const bbBreakout = /\bbb\s+breakout\s+(up|down)\b/i.exec(lowerText);
+  if (bbBreakout) {
+    const direction = bbBreakout[1].toLowerCase();
+    return ok(7, { category: 7, indicator: 'bb_breakout', direction, window: 20, op: '==' });
+  }
+  const donchian = /\bdonchian\s+(\d+)\s+breakout\s+(up|down)\b/i.exec(lowerText);
+  if (donchian) {
+    const window = parseInt(donchian[1]);
+    const direction = donchian[2].toLowerCase();
+    return ok(7, { category: 7, indicator: 'donchian_breakout', direction, window, op: '==' });
+  }
+  if (/\bpivot\s+breakout\b/i.test(lowerText)) {
+    return ok(7, { category: 7, indicator: 'pivot_break', direction: 'up', window: 5, op: '==' });
+  }
+
+  // Category 9: Specials ------------------------------------------------------
+  if (/\bbase\s+breakout\b/i.test(lowerText)) {
+    return ok(9, { category: 9, screener: 'base_breakout', direction: 'long', window: 20, op: '==' });
+  }
+  if (/\bturtle\s+(?:soup|signal)\b/i.test(lowerText)) {
+    return ok(9, { category: 9, screener: 'turtle_signal', direction: 'long', window: 20, op: '==' });
+  }
+  const adxTrend = /\badx\s+trend\s+(long|short)\b/i.exec(lowerText);
+  if (adxTrend) {
+    return ok(9, { category: 9, screener: 'adx_trend', direction: adxTrend[1].toLowerCase(), window: 14, op: '==' });
+  }
+
+  // Category 10: Time-based filters ------------------------------------------
+  const weekly = /\bweekly\s+return\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (weekly) {
+    const op = normalizeOperator(weekly[1]);
+    let value = parseFloat(weekly[2]);
+    if (weekly[3] === '%') value = value / 100;
+    return ok(10, { category: 10, timeframe: '1w', op, value });
+  }
+  const ytd = /\bytd\s+return\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
+  if (ytd) {
+    const op = normalizeOperator(ytd[1]);
+    let value = parseFloat(ytd[2]);
+    if (ytd[3] === '%') value = value / 100;
+    return ok(10, { category: 10, timeframe: 'ytd', op, value });
   }
 
   return { success: false };
@@ -394,12 +594,51 @@ async function setCachedDataDB(supabaseAdmin: any, csvData: string): Promise<voi
   }
 }
 
+// Optional: Supabase KV API (if available in this runtime)
+async function getCachedDataKV(supabaseAdmin: any): Promise<string | null> {
+  try {
+    const kv = (supabaseAdmin as any)?.kv;
+    if (!kv?.get) {
+      console.log('ℹ️ Supabase KV API not available in this environment');
+      return null;
+    }
+    const res = await kv.get('stocks_data_csv');
+    // Different SDKs may return { value }, { data }, or raw value
+    const value = (res && (res.value ?? res.data ?? res)) as string | null;
+    if (!value) return null;
+    console.log('📦 Cache hit (KV)');
+    return value;
+  } catch (e) {
+    console.warn('⚠️ KV get failed, will fallback to DB cache:', e);
+    return null;
+  }
+}
+
+async function setCachedDataKV(supabaseAdmin: any, csvData: string): Promise<void> {
+  try {
+    const kv = (supabaseAdmin as any)?.kv;
+    if (!kv?.set) return;
+    // If TTL is supported by your KV, you can pass it here; otherwise it will just overwrite
+    await kv.set('stocks_data_csv', csvData);
+    console.log('✅ Cache (KV) updated successfully');
+  } catch (e) {
+    console.warn('⚠️ KV set failed, continuing with DB cache:', e);
+  }
+}
+
 /**
  * Fetch Google Sheets data with caching using DB
  * Checks cache first, fetches from Google Sheets if cache is stale/missing
  */
 async function fetchGoogleSheetsDataWithCache(supabaseAdmin: any): Promise<any[]> {
-  // Try cache first
+  // Try KV cache first (if available)
+  const cachedKv = await getCachedDataKV(supabaseAdmin);
+  if (cachedKv) {
+    console.log('📊 Using cached Google Sheets data (KV)');
+    return parseCSV(cachedKv);
+  }
+
+  // Fallback to DB cache
   const cachedCsv = await getCachedDataDB(supabaseAdmin);
   if (cachedCsv) {
     console.log('📊 Using cached Google Sheets data (DB)');
@@ -415,8 +654,9 @@ async function fetchGoogleSheetsDataWithCache(supabaseAdmin: any): Promise<any[]
   }
   const csvText = await response.text();
 
-  // Update cache asynchronously (no await to keep response fast)
-  setCachedDataDB(supabaseAdmin, csvText).catch((err) => console.error('Cache update failed (DB):', err));
+  // Update caches asynchronously (fire-and-forget)
+  setCachedDataKV(supabaseAdmin, csvText).catch((err) => console.warn('KV cache update failed:', err));
+  setCachedDataDB(supabaseAdmin, csvText).catch((err) => console.error('DB cache update failed:', err));
 
   return parseCSV(csvText);
 }
@@ -570,28 +810,28 @@ async function parseQuery(text: string, userId: string | undefined, supabaseAdmi
     parsedFilter = await parseWithLLMs(text);
   }
 
-  // Track LLM usage if user is authenticated and LLM was used
-  console.log(`User ID: ${userId}, Parser Type: ${parsedFilter.parser}`);
-  if (userId && parsedFilter.parser === 'llm') {
-    try {
-      const attemptCount = parsedFilter.modelsAttempted?.length || 0;
-      
-      await supabaseAdmin.from('llm_usage').insert({
-        user_id: userId,
-        user_query: text,
-        parsed_query: parsedFilter,
-        model_used: parsedFilter.modelUsed,
-        confidence: parsedFilter.confidence,
-        parser_type: parsedFilter.parser,
-        success: parsedFilter.category !== 11,
-        attempt_count: attemptCount
-      });
-      
-      console.log(`📊 LLM usage tracked: ${attemptCount} models attempted`);
-    } catch (error) {
-      console.error('❌ Failed to track LLM usage:', error);
-    }
+// Track LLM usage whenever LLM was used (regardless of user auth)
+console.log(`[LLM] Parser type: ${parsedFilter.parser}, user: ${userId || 'anon'}`);
+if (parsedFilter.parser === 'llm') {
+  try {
+    const attemptCount = parsedFilter.modelsAttempted?.length || 0;
+
+    await supabaseAdmin.from('llm_usage').insert({
+      user_id: userId || null,
+      user_query: text,
+      parsed_query: parsedFilter,
+      model_used: parsedFilter.modelUsed,
+      confidence: parsedFilter.confidence,
+      parser_type: parsedFilter.parser,
+      success: parsedFilter.category !== 11,
+      attempt_count: attemptCount
+    });
+
+    console.log(`[LLM] Usage logged. attempts=${attemptCount}, model=${parsedFilter.modelUsed}`);
+  } catch (error) {
+    console.error('[LLM] Failed to track LLM usage:', error);
   }
+}
 
   return parsedFilter;
 }
