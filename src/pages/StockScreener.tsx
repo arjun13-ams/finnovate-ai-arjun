@@ -281,43 +281,50 @@ const StockScreener = () => {
           )}
 
 
-          {results.length > 0 && (
+          {(results.length > 0 || parsedQuery) && (
             <Card className="card-elevated p-8">
               <h3 className="text-xl font-semibold mb-4">
                 Screening Results ({results.length} stocks)
               </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 px-4">Symbol</th>
-                      <th className="text-right py-2 px-4">Close</th>
-                      <th className="text-right py-2 px-4">Volume</th>
-                      <th className="text-right py-2 px-4">Change %</th>
-                      <th className="text-right py-2 px-4">Indicator</th>
-                      <th className="text-right py-2 px-4">Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((stock, idx) => (
-                      <tr key={idx} className="border-b hover:bg-muted/50">
-                        <td className="py-2 px-4 font-medium">{stock.symbol}</td>
-                        <td className="text-right py-2 px-4">${stock.close?.toFixed(2)}</td>
-                        <td className="text-right py-2 px-4">{stock.volume?.toLocaleString()}</td>
-                        <td className={`text-right py-2 px-4 ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {stock.change?.toFixed(2)}%
-                        </td>
-                        <td className="text-right py-2 px-4 text-xs text-muted-foreground uppercase">
-                          {stock.indicator_name}
-                        </td>
-                        <td className="text-right py-2 px-4 font-medium">
-                          {stock.indicator_value?.toFixed(2)}
-                        </td>
+              {results.length === 0 && parsedQuery && (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">No stocks match your criteria. Try adjusting your query.</p>
+                </div>
+              )}
+              {results.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 px-4">Symbol</th>
+                        <th className="text-right py-2 px-4">Close</th>
+                        <th className="text-right py-2 px-4">Volume</th>
+                        <th className="text-right py-2 px-4">Change %</th>
+                        <th className="text-right py-2 px-4">Indicator</th>
+                        <th className="text-right py-2 px-4">Value</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {results.map((stock, idx) => (
+                        <tr key={idx} className="border-b hover:bg-muted/50">
+                          <td className="py-2 px-4 font-medium">{stock.symbol}</td>
+                          <td className="text-right py-2 px-4">${stock.close?.toFixed(2)}</td>
+                          <td className="text-right py-2 px-4">{stock.volume?.toLocaleString()}</td>
+                          <td className={`text-right py-2 px-4 ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {stock.change?.toFixed(2)}%
+                          </td>
+                          <td className="text-right py-2 px-4 text-xs text-muted-foreground uppercase">
+                            {stock.indicator_name}
+                          </td>
+                          <td className="text-right py-2 px-4 font-medium">
+                            {stock.indicator_value?.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </Card>
           )}
         </div>

@@ -2,3 +2,6 @@ project_id = "yzaeeosgedmbjlddtqhh"
 
 [functions.stock-screener]
 verify_jwt = true
+
+[functions.prompt-generator]
+verify_jwt = true

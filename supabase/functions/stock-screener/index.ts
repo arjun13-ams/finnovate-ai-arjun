@@ -417,6 +417,37 @@ function parseQueryRegex(text: string): { success: boolean; filter?: ParsedQuery
     return ok(2, { category: 2, ma_type: maType, window, op: 'proximity_within', value });
   }
 
+  // Category 3: Relative Strength --------------------------------------------
+  const rsMatch = /\bRS\s+(?:vs|versus)\s+(\w+)\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
+  if (rsMatch) {
+    const benchmark = rsMatch[1];
+    const op = normalizeOperator(rsMatch[2]);
+    const value = parseFloat(rsMatch[3]);
+    return ok(3, { category: 3, benchmark, op, value });
+  }
+
+  // Category 4: Percent Change from Reference --------------------------------
+  const upFromLow = /\b(?:up|above)\s+(\d+(?:\.\d+)?)%?\s+from\s+(1d|1w|1m|3m|6m|52w|ytd)_low\b/i.exec(lowerText);
+  if (upFromLow) {
+    const value = parseFloat(upFromLow[1]);
+    const ref = upFromLow[2] + '_low';
+    return ok(4, { category: 4, reference: ref, op: '>', value });
+  }
+
+  const downFromHigh = /\b(?:down|below)\s+(\d+(?:\.\d+)?)%?\s+from\s+(1d|1w|1m|3m|6m|52w|ytd)_high\b/i.exec(lowerText);
+  if (downFromHigh) {
+    const value = parseFloat(downFromHigh[1]);
+    const ref = downFromHigh[2] + '_high';
+    return ok(4, { category: 4, reference: ref, op: '<', value });
+  }
+
+  const withinHigh = /\bwithin\s+(\d+(?:\.\d+)?)%?\s+of\s+(52w)_high\b/i.exec(lowerText);
+  if (withinHigh) {
+    const value = parseFloat(withinHigh[1]);
+    const ref = withinHigh[2] + '_high';
+    return ok(4, { category: 4, reference: ref, op: 'between', value });
+  }
+
   // Category 5: Volume / Volatility ------------------------------------------
   // Volume spike vs SMA
   const volumeMatch = /\bvolume\s+spike\s+(\d+(?:\.\d+)?)\s*[x×]?\s*sma\s+(\d+)/i.exec(lowerText);
