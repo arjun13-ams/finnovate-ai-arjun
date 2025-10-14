@@ -173,11 +173,9 @@ serve(async (req) => {
     // If stats-only request, return just the dataset stats
     if (statsOnly) {
       const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
-      const dateNumbers = stockData
-        .map((r: any) => new Date(r.date).getTime())
-        .filter((t: number) => !Number.isNaN(t));
-      const dateFrom = dateNumbers.length ? new Date(Math.min(...dateNumbers)).toISOString().slice(0, 10) : null;
-      const dateTo = dateNumbers.length ? new Date(Math.max(...dateNumbers)).toISOString().slice(0, 10) : null;
+      // Data is already sorted by symbol then date, so first/last dates are at the ends
+      const dateFrom = stockData.length > 0 ? stockData[0].date : null;
+      const dateTo = stockData.length > 0 ? stockData[stockData.length - 1].date : null;
 
       console.log('✅ Returning stats only');
       return new Response(
@@ -199,11 +197,9 @@ serve(async (req) => {
 
     // Step 2: Compute dataset stats
     const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
-    const dateNumbers = stockData
-      .map((r: any) => new Date(r.date).getTime())
-      .filter((t: number) => !Number.isNaN(t));
-    const dateFrom = dateNumbers.length ? new Date(Math.min(...dateNumbers)).toISOString().slice(0, 10) : null;
-    const dateTo = dateNumbers.length ? new Date(Math.max(...dateNumbers)).toISOString().slice(0, 10) : null;
+    // Data is already sorted by symbol then date, so first/last dates are at the ends
+    const dateFrom = stockData.length > 0 ? stockData[0].date : null;
+    const dateTo = stockData.length > 0 ? stockData[stockData.length - 1].date : null;
 
     // Step 3: Screen stocks based on parsed filter
     const results = await screenStocks(stockData, parsedFilter);
@@ -625,51 +621,14 @@ async function setCachedDataDB(supabaseAdmin: any, csvData: string): Promise<voi
   }
 }
 
-// Optional: Supabase KV API (if available in this runtime)
-async function getCachedDataKV(supabaseAdmin: any): Promise<string | null> {
-  try {
-    const kv = (supabaseAdmin as any)?.kv;
-    if (!kv?.get) {
-      console.log('ℹ️ Supabase KV API not available in this environment');
-      return null;
-    }
-    const res = await kv.get('stocks_data_csv');
-    // Different SDKs may return { value }, { data }, or raw value
-    const value = (res && (res.value ?? res.data ?? res)) as string | null;
-    if (!value) return null;
-    console.log('📦 Cache hit (KV)');
-    return value;
-  } catch (e) {
-    console.warn('⚠️ KV get failed, will fallback to DB cache:', e);
-    return null;
-  }
-}
-
-async function setCachedDataKV(supabaseAdmin: any, csvData: string): Promise<void> {
-  try {
-    const kv = (supabaseAdmin as any)?.kv;
-    if (!kv?.set) return;
-    // If TTL is supported by your KV, you can pass it here; otherwise it will just overwrite
-    await kv.set('stocks_data_csv', csvData);
-    console.log('✅ Cache (KV) updated successfully');
-  } catch (e) {
-    console.warn('⚠️ KV set failed, continuing with DB cache:', e);
-  }
-}
+// Supabase KV removed - using sessionStorage on client side for faster execution
 
 /**
- * Fetch Google Sheets data with caching using DB
- * Checks cache first, fetches from Google Sheets if cache is stale/missing
+ * Fetch Google Sheets data with caching using DB only
+ * (Client-side sessionStorage provides faster caching)
  */
 async function fetchGoogleSheetsDataWithCache(supabaseAdmin: any): Promise<any[]> {
-  // Try KV cache first (if available)
-  const cachedKv = await getCachedDataKV(supabaseAdmin);
-  if (cachedKv) {
-    console.log('📊 Using cached Google Sheets data (KV)');
-    return parseCSV(cachedKv);
-  }
-
-  // Fallback to DB cache
+  // Check DB cache
   const cachedCsv = await getCachedDataDB(supabaseAdmin);
   if (cachedCsv) {
     console.log('📊 Using cached Google Sheets data (DB)');
@@ -685,8 +644,7 @@ async function fetchGoogleSheetsDataWithCache(supabaseAdmin: any): Promise<any[]
   }
   const csvText = await response.text();
 
-  // Update caches asynchronously (fire-and-forget)
-  setCachedDataKV(supabaseAdmin, csvText).catch((err) => console.warn('KV cache update failed:', err));
+  // Update DB cache asynchronously
   setCachedDataDB(supabaseAdmin, csvText).catch((err) => console.error('DB cache update failed:', err));
 
   return parseCSV(csvText);
@@ -869,6 +827,29 @@ if (parsedFilter.parser === 'llm') {
 
 // ============ CSV PARSING ============
 
+/**
+ * Parse dd-mm-yyyy date string to Date object
+ */
+function parseDDMMYYYY(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return null;
+  
+  const day = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
+  const year = parseInt(parts[2], 10);
+  
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+  
+  const date = new Date(year, month, day);
+  // Validate the date is valid
+  if (date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) {
+    return null;
+  }
+  
+  return date;
+}
+
 function parseCSV(csvText: string): any[] {
   const lines = csvText.trim().split('\n');
   const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
@@ -881,18 +862,35 @@ function parseCSV(csvText: string): any[] {
   const closeIdx = headers.indexOf('close');
   const volumeIdx = headers.indexOf('volume');
 
+  console.log(`📊 CSV Headers:`, headers);
+  console.log(`📊 Total lines in CSV: ${lines.length}`);
+
   const data: any[] = [];
+  let skippedRows = 0;
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (!line) continue;
+    if (!line) {
+      skippedRows++;
+      continue;
+    }
 
     const values = line.split(',').map(v => v.trim());
 
     try {
+      const dateStr = values[dateIdx] || '';
+      const parsedDate = parseDDMMYYYY(dateStr);
+      
+      // Skip rows with invalid dates
+      if (!dateStr || !parsedDate) {
+        skippedRows++;
+        continue;
+      }
+
       const record = {
         symbol: values[symbolIdx] || '',
-        date: values[dateIdx] || '',
+        date: dateStr, // Keep original dd-mm-yyyy format
+        _dateObj: parsedDate, // Store parsed date for sorting
         open: parseFloat(values[openIdx]) || 0,
         high: parseFloat(values[highIdx]) || 0,
         low: parseFloat(values[lowIdx]) || 0,
@@ -900,13 +898,31 @@ function parseCSV(csvText: string): any[] {
         volume: parseFloat(values[volumeIdx]) || 0,
       };
 
-      if (record.symbol && record.date) {
+      if (record.symbol) {
         data.push(record);
       }
     } catch (error) {
-      console.warn(`Skipping invalid row ${i}`);
+      console.warn(`Skipping invalid row ${i}:`, error);
+      skippedRows++;
     }
   }
+
+  // Sort by symbol (ascending), then by date (ascending)
+  data.sort((a, b) => {
+    const symbolCompare = a.symbol.localeCompare(b.symbol);
+    if (symbolCompare !== 0) return symbolCompare;
+    return a._dateObj.getTime() - b._dateObj.getTime();
+  });
+
+  // Remove temporary _dateObj after sorting
+  data.forEach(record => delete record._dateObj);
+
+  const uniqueSymbols = new Set(data.map(d => d.symbol)).size;
+  const dates = data.map(d => d.date);
+  
+  console.log(`📊 Parsed ${data.length} records (${skippedRows} skipped)`);
+  console.log(`📊 Unique symbols: ${uniqueSymbols}`);
+  console.log(`📊 Date range: ${dates[0]} to ${dates[dates.length - 1]}`);
 
   return data;
 }

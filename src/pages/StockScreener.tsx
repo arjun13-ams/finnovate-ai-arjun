@@ -10,6 +10,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
+const CACHE_KEY = 'stock_screener_data';
+const CACHE_TIMESTAMP_KEY = 'stock_screener_data_timestamp';
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
 const StockScreener = () => {
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -20,14 +24,53 @@ const StockScreener = () => {
   const { user, loading } = useAuth();
   const { toast } = useToast();
 
-  // Fetch dataset stats on page load
+  // Fetch dataset stats on page load with sessionStorage cache
   useEffect(() => {
     if (user && !isLoadingStats && !datasetStats) {
       fetchDatasetStats();
     }
   }, [user]);
 
+  const getCachedStats = (): any | null => {
+    try {
+      const timestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
+      if (!timestamp) return null;
+
+      const age = Date.now() - parseInt(timestamp, 10);
+      if (age > CACHE_DURATION) {
+        sessionStorage.removeItem(CACHE_KEY);
+        sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
+        return null;
+      }
+
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (!cached) return null;
+
+      return JSON.parse(cached);
+    } catch (error) {
+      console.error('Error reading cache:', error);
+      return null;
+    }
+  };
+
+  const setCachedStats = (stats: any): void => {
+    try {
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify(stats));
+      sessionStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+    } catch (error) {
+      console.error('Error setting cache:', error);
+    }
+  };
+
   const fetchDatasetStats = async () => {
+    // Check cache first
+    const cached = getCachedStats();
+    if (cached) {
+      console.log('📦 Using cached dataset stats');
+      setDatasetStats(cached);
+      return;
+    }
+
     setIsLoadingStats(true);
     try {
       const { data, error } = await supabase.functions.invoke('stock-screener', {
@@ -38,6 +81,7 @@ const StockScreener = () => {
 
       if (data?.datasetStats) {
         setDatasetStats(data.datasetStats);
+        setCachedStats(data.datasetStats);
       }
     } catch (error: any) {
       console.error('Failed to fetch dataset stats:', error);
