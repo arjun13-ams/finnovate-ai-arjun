@@ -9,6 +9,9 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { getStockData } from "@/lib/stockData";
+import { parseQueryRegex } from "@/lib/regexParser";
+import { screenStocks } from "@/lib/screenExecutor";
 
 const CACHE_KEY = 'stock_screener_data';
 const CACHE_TIMESTAMP_KEY = 'stock_screener_data_timestamp';
@@ -24,67 +27,29 @@ const StockScreener = () => {
   const { user, loading } = useAuth();
   const { toast } = useToast();
 
-  // Fetch dataset stats on page load with sessionStorage cache
+  // Load dataset stats on mount
   useEffect(() => {
     if (user && !isLoadingStats && !datasetStats) {
-      fetchDatasetStats();
+      loadDatasetStats();
     }
   }, [user]);
 
-  const getCachedStats = (): any | null => {
-    try {
-      const timestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
-      if (!timestamp) return null;
-
-      const age = Date.now() - parseInt(timestamp, 10);
-      if (age > CACHE_DURATION) {
-        sessionStorage.removeItem(CACHE_KEY);
-        sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
-        return null;
-      }
-
-      const cached = sessionStorage.getItem(CACHE_KEY);
-      if (!cached) return null;
-
-      return JSON.parse(cached);
-    } catch (error) {
-      console.error('Error reading cache:', error);
-      return null;
-    }
-  };
-
-  const setCachedStats = (stats: any): void => {
-    try {
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify(stats));
-      sessionStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-    } catch (error) {
-      console.error('Error setting cache:', error);
-    }
-  };
-
-  const fetchDatasetStats = async () => {
-    // Check cache first
-    const cached = getCachedStats();
-    if (cached) {
-      console.log('📦 Using cached dataset stats');
-      setDatasetStats(cached);
-      return;
-    }
-
+  const loadDatasetStats = async () => {
     setIsLoadingStats(true);
     try {
-      const { data, error } = await supabase.functions.invoke('stock-screener', {
-        body: { statsOnly: true }
+      const stockData = await getStockData();
+      const uniqueSymbols = new Set(stockData.map(r => r.symbol)).size;
+      const dateFrom = stockData.length > 0 ? stockData[0].date : null;
+      const dateTo = stockData.length > 0 ? stockData[stockData.length - 1].date : null;
+      
+      setDatasetStats({
+        uniqueSymbols,
+        recordCount: stockData.length,
+        dateFrom,
+        dateTo
       });
-
-      if (error) throw error;
-
-      if (data?.datasetStats) {
-        setDatasetStats(data.datasetStats);
-        setCachedStats(data.datasetStats);
-      }
     } catch (error: any) {
-      console.error('Failed to fetch dataset stats:', error);
+      console.error('Failed to load dataset stats:', error);
     } finally {
       setIsLoadingStats(false);
     }
@@ -103,29 +68,66 @@ const StockScreener = () => {
     setIsProcessing(true);
     setResults([]);
     setParsedQuery(null);
-    setDatasetStats(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('stock-screener', {
-        body: { query: query.trim() }
-      });
-
-      if (error) throw error;
-
-      if (data?.results) {
-        setResults(data.results);
-        setParsedQuery(data.parsedQuery);
-        setDatasetStats(data.datasetStats || null);
-        toast({
-          title: "Screening complete",
-          description: `Found ${data.results.length} stocks matching your criteria`,
-        });
+      console.log('🔍 Parsing query:', query.trim());
+      
+      // Step 1: Try regex parser first
+      const regexResult = parseQueryRegex(query.trim());
+      let parsedFilter;
+      
+      if (regexResult.success) {
+        console.log('✅ Regex parser succeeded');
+        parsedFilter = regexResult.filter!;
       } else {
-        toast({
-          title: "No results",
-          description: "No stocks matched your screening criteria",
+        console.log('⚠️ Regex parser failed, falling back to LLM...');
+        
+        // Step 2: Fallback to LLM parser
+        const { data: llmData, error: llmError } = await supabase.functions.invoke('stock-screener', {
+          body: { query: query.trim() }
         });
+        
+        if (llmError) throw llmError;
+        if (!llmData?.parsedQuery) throw new Error('LLM parser failed');
+        
+        parsedFilter = llmData.parsedQuery;
+        console.log('✅ LLM parser succeeded');
       }
+      
+      console.log('[Parser] Type:', parsedFilter.parser);
+      setParsedQuery({
+        ...parsedFilter,
+        userQuery: query.trim(),
+        technicalQuery: parsedFilter.conditions
+      });
+      
+      // Step 3: Fetch stock data
+      console.log('📊 Fetching stock data...');
+      const stockData = await getStockData();
+      
+      // Calculate stats
+      const uniqueSymbols = new Set(stockData.map(r => r.symbol)).size;
+      const dateFrom = stockData.length > 0 ? stockData[0].date : null;
+      const dateTo = stockData.length > 0 ? stockData[stockData.length - 1].date : null;
+      
+      setDatasetStats({
+        uniqueSymbols,
+        recordCount: stockData.length,
+        dateFrom,
+        dateTo
+      });
+      
+      // Step 4: Screen stocks
+      console.log('🔍 Screening stocks...');
+      const filteredResults = await screenStocks(stockData, parsedFilter);
+      
+      console.log('Found results:', filteredResults.length);
+      setResults(filteredResults);
+      
+      toast({
+        title: "Screening complete",
+        description: `Found ${filteredResults.length} stocks matching your criteria`,
+      });
     } catch (error: any) {
       console.error('Stock screening error:', error);
       toast({

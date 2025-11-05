@@ -6,10 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const GOOGLE_SHEETS_ID = '1Abo2NBSA5WavSfQSSo4LTBb9IwcNmGAXgqt42wpJGXo';
-const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
-
-// ============ FREE MODELS FOR OPENROUTER ============
+// Free models for OpenRouter
 const FREE_MODELS = [
   'x-ai/grok-4-fast:free',
   'z-ai/glm-4.5-air:free',
@@ -21,10 +18,8 @@ const FREE_MODELS = [
   'moonshotai/kimi-k2:free'
 ];
 
-// ============ COMPREHENSIVE SYSTEM PROMPT ============
 const SYSTEM_PROMPT = `You are a financial-screening compiler.
 Your ONLY task is to convert the user's natural-language query into a **strict JSON** that exactly matches the schema below.
-The schema is organised into the 11 logical categories (1-11) requested by the product team.
 
 ──────────────────────────────────
 GLOBAL RULES
@@ -33,10 +28,6 @@ GLOBAL RULES
 - All numeric literals must be numbers, not strings.
 - Time windows: use integer days, e.g. 14, 21, 50.
 - Percentages are decimals: 5 → 0.05.
-- All prices assumed to be in the quote currency of the market.
-- If an indicator is not explicitly mentioned, omit it.
-- If the query is ambiguous, map to the **lowest-numbered** matching category and return "confidence": "low".
-- If no category fits, return category "11" and a free-form string under "llmFallback".
 
 ──────────────────────────────────
 ALLOWED ENUM VALUES
@@ -44,8 +35,6 @@ ALLOWED ENUM VALUES
 op: ">", ">=", "<", "<=", "==", "between", "crossed_above", "crossed_below", "proximity_within"
 window: 5, 10, 14, 20, 21, 50, 100, 200
 ma_type: "sma", "ema", "wma", "hma", "rma", "dema", "tema"
-pattern_type: "bullish_engulfing", "bearish_engulfing", "doji", "hammer", "nr7", "inside_bar", "outside_bar"
-timeframe: "1d", "1w", "1m", "3m", "6m", "1y", "ytd"
 category: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 
 ──────────────────────────────────
@@ -64,39 +53,16 @@ CATEGORY DEFINITIONS
 
 [1] Indicator Threshold
    conditions: [{ "category": 1, "indicator": <str>, "window": <int>, "op": <op>, "value": <number|[low,high]> }]
-   Indicators: rsi, stoch, stochrsi, cci, williams_r, awesome_osc, kdj, ultimate_osc, chande_momentum, roc, money_flow_idx, percentage_price_osc, fisher_transform, tsi, schaff_trend_cycle
+   Indicators: rsi, stoch, stochrsi, cci, williams_r, mfi
 
 [2] Price vs Moving Averages
    conditions: [{ "category": 2, "ma_type": <ma_type>, "window": <int>, "op": "crossed_above"|"crossed_below"|"proximity_within", "value": <number> }]
-   MA Types: sma, ema, wma, hma, rma, tema, dema, kama, zlma
 
 [3] Relative Strength vs Index
    conditions: [{ "category": 3, "benchmark": <str>, "window": <int>, "op": <op>, "value": <number> }]
 
 [4] Percent Change from Reference
-   conditions: [{ "category": 4, "reference": "1d_low"|"1w_low"|"1m_low"|"52w_low"|"52w_high", "op": <op>, "value": <number> }]
-
-[5] Volume / Volatility
-   conditions: [{ "category": 5, "indicator": "volume"|"volume_sma"|"atr"|"bb_width"|"kc_width"|"ui", "window": <int>, "op": <op>, "value": <number> }]
-
-[6] Chart Patterns & Candles
-   conditions: [{ "category": 6, "pattern_type": <pattern_type>, "direction": "bullish"|"bearish", "window": <int> }]
-
-[7] Breakouts / Swing Conditions
-   conditions: [{ "category": 7, "indicator": "bb_breakout"|"kc_breakout"|"donchian_breakout"|"pivot_break", "direction": "up"|"down", "window": <int> }]
-
-[8] Composite Conditions (AND/OR)
-   conditions: [{ "category": 8, "operator": "and"|"or", "subConditions": [ ... ] }]
-
-[9] Special Screeners
-   conditions: [{ "category": 9, "screener": "base_breakout"|"squeeze_pro"|"turtle_signal"|"adx_trend", "direction": "long"|"short", "window": <int> }]
-
-[10] Time-Based Filters
-   conditions: [{ "category": 10, "timeframe": <timeframe>, "op": <op>, "value": <number> }]
-
-[11] Fallback
-   conditions: [ ]
-   llmFallback: "free-form explanation"
+   conditions: [{ "category": 4, "reference": "1d_low"|"1w_low"|"52w_low"|"52w_high", "op": <op>, "value": <number> }]
 
 ──────────────────────────────────
 EXAMPLES
@@ -106,23 +72,11 @@ User: "RSI above 70"
 
 User: "EMA 20 crossed above SMA 50"
 → { "category": 2, "conditions": [{"category": 2, "ma_type": "ema", "window": 20, "op": "crossed_above", "value": 50 }], "confidence": "high" }
-
-User: "Stocks up 15% from 52-week low"
-→ { "category": 4, "conditions": [{"category": 4, "reference": "52w_low", "op": ">", "value": 0.15 }], "confidence": "high" }
 `;
-
-interface ScreenerCondition {
-  category: number;
-  indicator?: string;
-  window?: number;
-  op: string;
-  value?: number;
-  ma_type?: string;
-}
 
 interface ParsedQuery {
   category: number;
-  conditions: ScreenerCondition[];
+  conditions: any[];
   confidence: string;
   parser: string;
   modelUsed?: string | null;
@@ -136,96 +90,46 @@ serve(async (req) => {
   }
 
   try {
-    const { query, statsOnly } = await req.json();
+    const { query } = await req.json();
     const authHeader = req.headers.get('Authorization');
     
-    // Validate query only if not a stats-only request
-    if (!statsOnly && (!query || typeof query !== 'string')) {
+    if (!query || typeof query !== 'string') {
       return new Response(
         JSON.stringify({ error: 'Query is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('📥 Request:', statsOnly ? 'Stats only' : `Query: ${query}`);
+    console.log('📥 LLM Parser Request:', query);
 
-    // Initialize Supabase client
+    // Initialize Supabase
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader! } } }
     );
 
-    // Service role client for server-side ops (cache + logging)
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Get user ID
     const { data: { user } } = await supabase.auth.getUser();
     const userId = user?.id;
 
-    // Fetch stock data from Google Sheets (with caching)
-    const stockData = await fetchGoogleSheetsDataWithCache(supabaseAdmin);
-    console.log(`📊 Loaded ${stockData.length} stock records`);
-
-    // If stats-only request, return just the dataset stats
-    if (statsOnly) {
-      const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
-      // Data is already sorted by symbol then date, so first/last dates are at the ends
-      const dateFrom = stockData.length > 0 ? stockData[0].date : null;
-      const dateTo = stockData.length > 0 ? stockData[stockData.length - 1].date : null;
-
-      console.log('✅ Returning stats only');
-      return new Response(
-        JSON.stringify({
-          datasetStats: {
-            uniqueSymbols,
-            recordCount: stockData.length,
-            dateFrom,
-            dateTo
-          }
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Step 1: Parse query (regex first, then LLM fallback)
-    const parsedFilter = await parseQuery(query, userId, supabaseAdmin);
-    console.log('Parsed query:', JSON.stringify(parsedFilter));
-
-    // Step 2: Compute dataset stats
-    const uniqueSymbols = new Set(stockData.map((r: any) => r.symbol)).size;
-    // Data is already sorted by symbol then date, so first/last dates are at the ends
-    const dateFrom = stockData.length > 0 ? stockData[0].date : null;
-    const dateTo = stockData.length > 0 ? stockData[stockData.length - 1].date : null;
-
-    // Step 3: Screen stocks based on parsed filter
-    const results = await screenStocks(stockData, parsedFilter);
-    console.log('Found results:', results.length);
+    // Parse query using LLM
+    const parsedFilter = await parseQueryWithLLM(query, userId, supabaseAdmin);
+    console.log('✅ LLM Parsed query:', JSON.stringify(parsedFilter));
 
     return new Response(
       JSON.stringify({
         success: true,
-        results,
-        parsedQuery: {
-          ...parsedFilter,
-          userQuery: query,
-          technicalQuery: parsedFilter.conditions
-        },
-        datasetStats: {
-          uniqueSymbols,
-          recordCount: stockData.length,
-          dateFrom,
-          dateTo
-        },
-        totalMatched: results.length,
+        parsedQuery: parsedFilter,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error: any) {
-    console.error('Stock screener error:', error);
+    console.error('LLM parser error:', error);
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -233,881 +137,114 @@ serve(async (req) => {
   }
 });
 
-// ============ PARSING FUNCTIONS ============
-
-function normalizeOperator(op: string): string {
-  const opMap: Record<string, string> = {
-    'greater than': '>',
-    'more than': '>',
-    'above': '>',
-    'less than': '<',
-    'below': '<',
-    'greater than or equal to': '>=',
-    'at least': '>=',
-    'less than or equal to': '<=',
-    'at most': '<=',
-    'equal to': '==',
-    'equals': '==',
-  };
-  return opMap[op.toLowerCase().trim()] || op;
-}
-
-function parseQueryRegex(text: string): { success: boolean; filter?: ParsedQuery } {
-  const lowerText = text.toLowerCase();
-
-  // Helper to build a successful response
-  const ok = (category: number, condition: any): { success: boolean; filter: ParsedQuery } => ({
-    success: true,
-    filter: {
-      category,
-      conditions: [condition],
-      confidence: 'high',
-      parser: 'regex',
-    },
-  });
-
-  // Category 1: Indicator thresholds -------------------------------------------------
-  // RSI
-  const rsiMatch = /\brsi\s*(?:(\d+))?\s*(>|>=|<|<=|above|below|greater than|less than)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (rsiMatch) {
-    const window = rsiMatch[1] ? parseInt(rsiMatch[1]) : 14;
-    const op = normalizeOperator(rsiMatch[2]);
-    const value = parseFloat(rsiMatch[3]);
-    return ok(1, { category: 1, indicator: 'rsi', window, op, value });
-  }
-
-  // Stochastic
-  const stochMatch = /\bstoch(?:astic)?\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (stochMatch) {
-    const op = normalizeOperator(stochMatch[1]);
-    const value = parseFloat(stochMatch[2]);
-    return ok(1, { category: 1, indicator: 'stoch', window: 14, op, value });
-  }
-
-  // Stoch RSI between
-  const stochRsiBetween = /\bstoch\s*rsi\s*(?:\(?(\d+)\)?)?\s*(\d+(?:\.\d+)?)\s*[-to]+\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (stochRsiBetween) {
-    const window = stochRsiBetween[1] ? parseInt(stochRsiBetween[1]) : 14;
-    const low = parseFloat(stochRsiBetween[2]);
-    const high = parseFloat(stochRsiBetween[3]);
-    return ok(1, { category: 1, indicator: 'stochrsi', window, op: 'between', value: [low, high] as any });
-  }
-
-  // CCI
-  const cciMatch = /\bcci\s*(?:(\d+))?\s*(>|>=|<|<=|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (cciMatch) {
-    const window = cciMatch[1] ? parseInt(cciMatch[1]) : 20;
-    const op = normalizeOperator(cciMatch[2]);
-    const value = parseFloat(cciMatch[3]);
-    return ok(1, { category: 1, indicator: 'cci', window, op, value });
-  }
-
-  // Williams %R
-  const wrMatch = /\bwilliams\s*%?r\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (wrMatch) {
-    const op = normalizeOperator(wrMatch[1]);
-    const value = parseFloat(wrMatch[2]);
-    return ok(1, { category: 1, indicator: 'williams_r', window: 14, op, value });
-  }
-
-  // Awesome Oscillator (AO)
-  const aoMatch = /\b(?:awesome\s+oscillator|ao)\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (aoMatch) {
-    const op = normalizeOperator(aoMatch[1]);
-    const value = parseFloat(aoMatch[2]);
-    return ok(1, { category: 1, indicator: 'awesome_osc', window: 5, op, value });
-  }
-
-  // KDJ
-  const kdjMatch = /\bkdj\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (kdjMatch) {
-    const op = normalizeOperator(kdjMatch[1]);
-    const value = parseFloat(kdjMatch[2]);
-    return ok(1, { category: 1, indicator: 'kdj', window: 14, op, value });
-  }
-
-  // Ultimate Oscillator (UO)
-  const uoMatch = /\b(?:ultimate\s+oscillator|uo)\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (uoMatch) {
-    const op = normalizeOperator(uoMatch[1]);
-    const value = parseFloat(uoMatch[2]);
-    return ok(1, { category: 1, indicator: 'ultimate_osc', window: 14, op, value });
-  }
-
-  // Chande Momentum (CMO)
-  const cmoMatch = /\b(?:chande\s+momentum|cmo)\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (cmoMatch) {
-    const op = normalizeOperator(cmoMatch[1]);
-    const value = parseFloat(cmoMatch[2]);
-    return ok(1, { category: 1, indicator: 'chande_momentum', window: 14, op, value });
-  }
-
-  // ROC
-  const rocMatch = /\broc\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (rocMatch) {
-    const op = normalizeOperator(rocMatch[1]);
-    let value = parseFloat(rocMatch[2]);
-    if (rocMatch[3] === '%') value = value / 100;
-    return ok(1, { category: 1, indicator: 'roc', window: 14, op, value });
-  }
-
-  // MFI
-  const mfiMatch = /\bmfi\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (mfiMatch) {
-    const op = normalizeOperator(mfiMatch[1]);
-    const value = parseFloat(mfiMatch[2]);
-    return ok(1, { category: 1, indicator: 'money_flow_idx', window: 14, op, value });
-  }
-
-  // PPO
-  const ppoMatch = /\bppo\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (ppoMatch) {
-    const op = normalizeOperator(ppoMatch[1]);
-    let value = parseFloat(ppoMatch[2]);
-    if (ppoMatch[3] === '%') value = value / 100;
-    return ok(1, { category: 1, indicator: 'percentage_price_osc', window: 14, op, value });
-  }
-
-  // Fisher Transform cross
-  const fisherMatch = /\bfisher\s*transform\b.*?crossed\s+(above|below)\s*(-?\d+(?:\.\d+)?|zero)/i.exec(lowerText);
-  if (fisherMatch) {
-    const direction = fisherMatch[1].toLowerCase();
-    const op = direction === 'above' ? 'crossed_above' : 'crossed_below';
-    const valueRaw = fisherMatch[2].toLowerCase();
-    const value = valueRaw === 'zero' ? 0 : parseFloat(valueRaw);
-    return ok(1, { category: 1, indicator: 'fisher_transform', window: 9, op, value });
-  }
-
-  // TSI
-  const tsiMatch = /\btsi\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (tsiMatch) {
-    const op = normalizeOperator(tsiMatch[1]);
-    const value = parseFloat(tsiMatch[2]);
-    return ok(1, { category: 1, indicator: 'tsi', window: 25, op, value });
-  }
-
-  // STC
-  const stcMatch = /\bstc\b.*?(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (stcMatch) {
-    const op = normalizeOperator(stcMatch[1]);
-    const value = parseFloat(stcMatch[2]);
-    return ok(1, { category: 1, indicator: 'schaff_trend_cycle', window: 10, op, value });
-  }
-
-  // Category 2: Price vs Moving Averages -------------------------------------
-  const priceMAMatch = /\b(?:price|close)?\s*(crossed\s+above|crossed\s+below|above|below)\s+(sma|ema|wma|hma|kama|dema|tema|zlma)\s+(\d+)/i.exec(lowerText);
-  if (priceMAMatch) {
-    const op = priceMAMatch[1].includes('crossed')
-      ? (priceMAMatch[1].includes('above') ? 'crossed_above' : 'crossed_below')
-      : (priceMAMatch[1].includes('above') ? '>' : '<');
-    const maType = priceMAMatch[2];
-    const window = parseInt(priceMAMatch[3]);
-    return ok(2, { category: 2, ma_type: maType, window, op });
-  }
-
-  const priceWithinMA = /\bwithin\s+(\d+(?:\.\d+)?)%?\s+of\s+(sma|ema|wma|hma|kama|dema|tema|zlma)\s+(\d+)/i.exec(lowerText);
-  if (priceWithinMA) {
-    const value = parseFloat(priceWithinMA[1]);
-    const maType = priceWithinMA[2];
-    const window = parseInt(priceWithinMA[3]);
-    return ok(2, { category: 2, ma_type: maType, window, op: 'proximity_within', value });
-  }
-
-  // Category 3: Relative Strength --------------------------------------------
-  const rsMatch = /\bRS\s+(?:vs|versus)\s+(\w+)\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (rsMatch) {
-    const benchmark = rsMatch[1];
-    const op = normalizeOperator(rsMatch[2]);
-    const value = parseFloat(rsMatch[3]);
-    return ok(3, { category: 3, benchmark, op, value });
-  }
-
-  // Category 4: Percent Change from Reference --------------------------------
-  const upFromLow = /\b(?:up|above)\s+(\d+(?:\.\d+)?)%?\s+from\s+(1d|1w|1m|3m|6m|52w|ytd)_low\b/i.exec(lowerText);
-  if (upFromLow) {
-    const value = parseFloat(upFromLow[1]);
-    const ref = upFromLow[2] + '_low';
-    return ok(4, { category: 4, reference: ref, op: '>', value });
-  }
-
-  const downFromHigh = /\b(?:down|below)\s+(\d+(?:\.\d+)?)%?\s+from\s+(1d|1w|1m|3m|6m|52w|ytd)_high\b/i.exec(lowerText);
-  if (downFromHigh) {
-    const value = parseFloat(downFromHigh[1]);
-    const ref = downFromHigh[2] + '_high';
-    return ok(4, { category: 4, reference: ref, op: '<', value });
-  }
-
-  const withinHigh = /\bwithin\s+(\d+(?:\.\d+)?)%?\s+of\s+(52w)_high\b/i.exec(lowerText);
-  if (withinHigh) {
-    const value = parseFloat(withinHigh[1]);
-    const ref = withinHigh[2] + '_high';
-    return ok(4, { category: 4, reference: ref, op: 'between', value });
-  }
-
-  // Category 5: Volume / Volatility ------------------------------------------
-  // Volume spike vs SMA
-  const volumeMatch = /\bvolume\s+spike\s+(\d+(?:\.\d+)?)\s*[x×]?\s*sma\s+(\d+)/i.exec(lowerText);
-  if (volumeMatch) {
-    const value = parseFloat(volumeMatch[1]);
-    const window = parseInt(volumeMatch[2]);
-    return ok(5, { category: 5, indicator: 'volume_sma', window, op: '>', value });
-  }
-
-  // ATR
-  const atrMatch = /\batr\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (atrMatch) {
-    const window = atrMatch[1] ? parseInt(atrMatch[1]) : 14;
-    const op = normalizeOperator(atrMatch[2]);
-    let value = parseFloat(atrMatch[3]);
-    if (atrMatch[4] === '%') value = value / 100;
-    return ok(5, { category: 5, indicator: 'atr', window, op, value });
-  }
-
-  // BB width
-  const bbwMatch = /\bbb\s*width\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (bbwMatch) {
-    const window = bbwMatch[1] ? parseInt(bbwMatch[1]) : 20;
-    const op = normalizeOperator(bbwMatch[2]);
-    let value = parseFloat(bbwMatch[3]);
-    if (bbwMatch[4] === '%') value = value / 100;
-    return ok(5, { category: 5, indicator: 'bb_width', window, op, value });
-  }
-
-  // KC width
-  const kcwMatch = /\bkc\s*width\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (kcwMatch) {
-    const window = kcwMatch[1] ? parseInt(kcwMatch[1]) : 20;
-    const op = normalizeOperator(kcwMatch[2]);
-    let value = parseFloat(kcwMatch[3]);
-    if (kcwMatch[4] === '%') value = value / 100;
-    return ok(5, { category: 5, indicator: 'kc_width', window, op, value });
-  }
-
-  // Ulcer Index
-  const uiMatch = /\bulcer\s*index\b\s*(?:(\d+))?\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)/i.exec(lowerText);
-  if (uiMatch) {
-    const window = uiMatch[1] ? parseInt(uiMatch[1]) : 14;
-    const op = normalizeOperator(uiMatch[2]);
-    const value = parseFloat(uiMatch[3]);
-    return ok(5, { category: 5, indicator: 'ui', window, op, value });
-  }
-
-  // Category 6: Candles & patterns -------------------------------------------
-  if (/\bbullish\s+engulfing\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'bullish_engulfing', window: 1, op: '==' });
-  }
-  if (/\bbearish\s+engulfing\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'bearish_engulfing', window: 1, op: '==' });
-  }
-  if (/\bdoji\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'doji', window: 1, op: '==' });
-  }
-  if (/\bhammer\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'hammer', window: 1, op: '==' });
-  }
-  if (/\bnr7\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'nr7', window: 1, op: '==' });
-  }
-  if (/\binside\s+bar\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'inside_bar', window: 1, op: '==' });
-  }
-  if (/\boutside\s+bar\b/i.test(lowerText)) {
-    return ok(6, { category: 6, pattern_type: 'outside_bar', window: 1, op: '==' });
-  }
-
-  // Category 7: Breakouts -----------------------------------------------------
-  const bbBreakout = /\bbb\s+breakout\s+(up|down)\b/i.exec(lowerText);
-  if (bbBreakout) {
-    const direction = bbBreakout[1].toLowerCase();
-    return ok(7, { category: 7, indicator: 'bb_breakout', direction, window: 20, op: '==' });
-  }
-  const donchian = /\bdonchian\s+(\d+)\s+breakout\s+(up|down)\b/i.exec(lowerText);
-  if (donchian) {
-    const window = parseInt(donchian[1]);
-    const direction = donchian[2].toLowerCase();
-    return ok(7, { category: 7, indicator: 'donchian_breakout', direction, window, op: '==' });
-  }
-  if (/\bpivot\s+breakout\b/i.test(lowerText)) {
-    return ok(7, { category: 7, indicator: 'pivot_break', direction: 'up', window: 5, op: '==' });
-  }
-
-  // Category 9: Specials ------------------------------------------------------
-  if (/\bbase\s+breakout\b/i.test(lowerText)) {
-    return ok(9, { category: 9, screener: 'base_breakout', direction: 'long', window: 20, op: '==' });
-  }
-  if (/\bturtle\s+(?:soup|signal)\b/i.test(lowerText)) {
-    return ok(9, { category: 9, screener: 'turtle_signal', direction: 'long', window: 20, op: '==' });
-  }
-  const adxTrend = /\badx\s+trend\s+(long|short)\b/i.exec(lowerText);
-  if (adxTrend) {
-    return ok(9, { category: 9, screener: 'adx_trend', direction: adxTrend[1].toLowerCase(), window: 14, op: '==' });
-  }
-
-  // Category 10: Time-based filters ------------------------------------------
-  const weekly = /\bweekly\s+return\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (weekly) {
-    const op = normalizeOperator(weekly[1]);
-    let value = parseFloat(weekly[2]);
-    if (weekly[3] === '%') value = value / 100;
-    return ok(10, { category: 10, timeframe: '1w', op, value });
-  }
-  const ytd = /\bytd\s+return\s*(>|>=|<|<=|greater than|less than|above|below)\s*(\d+(?:\.\d+)?)(%?)/i.exec(lowerText);
-  if (ytd) {
-    const op = normalizeOperator(ytd[1]);
-    let value = parseFloat(ytd[2]);
-    if (ytd[3] === '%') value = value / 100;
-    return ok(10, { category: 10, timeframe: 'ytd', op, value });
-  }
-
-  return { success: false };
-}
-
-// ============ GOOGLE SHEETS CACHING WITH DATABASE (kv_cache) ============
-
-/**
- * Get cached Google Sheets data from DB (kv_cache table)
- * Returns cached data if it exists and is less than CACHE_DURATION old
- */
-async function getCachedDataDB(supabaseAdmin: any): Promise<string | null> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('kv_cache')
-      .select('value, updated_at')
-      .eq('key', 'stocks_data_csv')
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('❌ Cache read DB error:', error);
-      return null;
-    }
-
-    if (!data) {
-      console.log('📦 Cache miss: No row in kv_cache');
-      return null;
-    }
-
-    const cacheAge = Date.now() - new Date(data.updated_at).getTime();
-    if (cacheAge > CACHE_DURATION) {
-      console.log(`📦 Cache expired (DB): Age ${Math.round(cacheAge / 60000)} minutes`);
-      return null;
-    }
-
-    console.log(`📦 Cache hit (DB): Age ${Math.round(cacheAge / 60000)} minutes`);
-    return data.value as string;
-  } catch (error) {
-    console.error('❌ Cache read DB exception:', error);
-    return null;
-  }
-}
-
-/**
- * Store Google Sheets data in DB cache (kv_cache)
- */
-async function setCachedDataDB(supabaseAdmin: any, csvData: string): Promise<void> {
-  try {
-    const { error } = await supabaseAdmin
-      .from('kv_cache')
-      .upsert({ key: 'stocks_data_csv', value: csvData })
-      .select('key');
-
-    if (error) {
-      console.error('❌ Cache write DB error:', error);
-      return;
-    }
-
-    console.log('✅ Cache (DB) updated successfully');
-  } catch (error) {
-    console.error('❌ Cache write DB exception:', error);
-  }
-}
-
-// Supabase KV removed - using sessionStorage on client side for faster execution
-
-/**
- * Fetch Google Sheets data with caching using DB only
- * (Client-side sessionStorage provides faster caching)
- */
-async function fetchGoogleSheetsDataWithCache(supabaseAdmin: any): Promise<any[]> {
-  // Check DB cache
-  const cachedCsv = await getCachedDataDB(supabaseAdmin);
-  if (cachedCsv) {
-    console.log('📊 Using cached Google Sheets data (DB)');
-    return parseCSV(cachedCsv);
-  }
-
-  // Cache miss - fetch from Google Sheets
-  console.log('📡 Fetching fresh data from Google Sheets...');
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEETS_ID}/export?format=csv`;
-  const response = await fetch(csvUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch Google Sheets: ${response.status} ${response.statusText}`);
-  }
-  const csvText = await response.text();
-
-  // Update DB cache asynchronously
-  setCachedDataDB(supabaseAdmin, csvText).catch((err) => console.error('DB cache update failed:', err));
-
-  return parseCSV(csvText);
-}
-
-// ============ OPENROUTER MULTI-MODEL LLM PARSING ============
-
-/**
- * Try parsing with a single OpenRouter model
- * Returns parsed result or null if parsing failed
- */
-async function tryModelWithConfidence(
-  apiKey: string,
+async function parseQueryWithLLM(
   query: string,
-  model: string
-): Promise<ParsedQuery | null> {
-  try {
-    console.log(`🤖 Trying model: ${model}`);
-    
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://stockscreener.ai',
-        'X-Title': 'Stock Screener AI'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: query }
-        ],
-        temperature: 0.0,
-        max_tokens: 1000
-      }),
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Model ${model} failed: ${response.status} - ${errorText}`);
-      return null;
-    }
-    
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    
-    if (!content) {
-      console.error(`❌ Model ${model} returned empty content`);
-      return null;
-    }
-    
-    // Try to parse JSON from content
-    let parsed: any;
-    try {
-      // Extract JSON if wrapped in markdown code blocks
-      const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
-      const jsonStr = jsonMatch ? jsonMatch[1] : content;
-      parsed = JSON.parse(jsonStr.trim());
-    } catch (parseError) {
-      console.error(`❌ Model ${model} returned invalid JSON:`, content);
-      return null;
-    }
-    
-    // Validate required fields
-    if (!parsed.category || !parsed.conditions || !parsed.confidence) {
-      console.error(`❌ Model ${model} returned incomplete schema`);
-      return null;
-    }
-    
-    console.log(`✅ Model ${model} parsed successfully with confidence: ${parsed.confidence}`);
-    
-    return {
-      category: parsed.category,
-      conditions: parsed.conditions,
-      confidence: parsed.confidence,
-      llmFallback: parsed.llmFallback || null,
-      parser: 'llm',
-      modelUsed: model
-    };
-    
-  } catch (error) {
-    console.error(`❌ Model ${model} error:`, error);
-    return null;
-  }
-}
-
-/**
- * Parse query using OpenRouter with multi-model fallback
- * Tries each free model until one returns high confidence
- */
-async function parseWithLLMs(query: string): Promise<ParsedQuery> {
+  userId: string | undefined,
+  supabaseAdmin: any
+): Promise<ParsedQuery> {
   const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
-  
   if (!OPENROUTER_API_KEY) {
-    console.error('❌ OPENROUTER_API_KEY not configured');
-    return {
-      category: 11,
-      conditions: [],
-      confidence: 'low',
-      parser: 'llm',
-      llmFallback: 'OPENROUTER_API_KEY not configured',
-      modelUsed: null,
-      modelsAttempted: []
-    };
+    throw new Error('OPENROUTER_API_KEY not configured');
   }
-  
+
   const modelsAttempted: string[] = [];
-  
-  // Try each model in sequence
+  let lastError: any = null;
+
   for (const model of FREE_MODELS) {
     modelsAttempted.push(model);
-    
-    const result = await tryModelWithConfidence(OPENROUTER_API_KEY, query, model);
-    
-    if (result && result.confidence === 'high') {
-      console.log(`🎯 High confidence achieved with ${model}`);
-      return {
-        ...result,
-        modelsAttempted
-      };
-    }
-  }
-  
-  // All models failed or returned low/medium confidence
-  console.log('⚠️ No model achieved high confidence');
-  return {
-    category: 11,
-    conditions: [],
-    confidence: 'low',
-    parser: 'llm',
-    llmFallback: 'Could not parse query with high confidence after trying all available models',
-    modelUsed: null,
-    modelsAttempted
-  };
-}
-
-async function parseQuery(text: string, userId: string | undefined, supabaseAdmin: any): Promise<ParsedQuery> {
-  console.log(`🔍 Parsing query: "${text}"`);
-  
-  // Try regex first (fast, free, covers ~70% of queries)
-  const regexResult = parseQueryRegex(text);
-  
-  let parsedFilter: ParsedQuery;
-  
-  if (regexResult.success && regexResult.filter) {
-    console.log('✅ Regex parser succeeded');
-    parsedFilter = regexResult.filter;
-  } else {
-    // Fallback to OpenRouter multi-model LLM
-    console.log('⚡ Regex failed, trying OpenRouter LLMs...');
-    parsedFilter = await parseWithLLMs(text);
-  }
-
-// Track LLM usage whenever LLM was used (regardless of user auth)
-console.log(`[LLM] Parser type: ${parsedFilter.parser}, user: ${userId || 'anon'}`);
-if (parsedFilter.parser === 'llm') {
-  try {
-    const attemptCount = parsedFilter.modelsAttempted?.length || 0;
-
-    await supabaseAdmin.from('llm_usage').insert({
-      user_id: userId || null,
-      user_query: text,
-      parsed_query: parsedFilter,
-      model_used: parsedFilter.modelUsed,
-      confidence: parsedFilter.confidence,
-      parser_type: parsedFilter.parser,
-      success: parsedFilter.category !== 11,
-      attempt_count: attemptCount
-    });
-
-    console.log(`[LLM] Usage logged. attempts=${attemptCount}, model=${parsedFilter.modelUsed}`);
-  } catch (error) {
-    console.error('[LLM] Failed to track LLM usage:', error);
-  }
-}
-
-  return parsedFilter;
-}
-
-// ============ CSV PARSING ============
-
-/**
- * Parse dd-mm-yyyy date string to Date object
- */
-function parseDDMMYYYY(dateStr: string): Date | null {
-  if (!dateStr) return null;
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return null;
-  
-  const day = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
-  const year = parseInt(parts[2], 10);
-  
-  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
-  
-  const date = new Date(year, month, day);
-  // Validate the date is valid
-  if (date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) {
-    return null;
-  }
-  
-  return date;
-}
-
-function parseCSV(csvText: string): any[] {
-  const lines = csvText.trim().split('\n');
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-
-  const symbolIdx = headers.indexOf('symbol');
-  const dateIdx = headers.indexOf('date');
-  const openIdx = headers.indexOf('open');
-  const highIdx = headers.indexOf('high');
-  const lowIdx = headers.indexOf('low');
-  const closeIdx = headers.indexOf('close');
-  const volumeIdx = headers.indexOf('volume');
-
-  console.log(`📊 CSV Headers:`, headers);
-  console.log(`📊 Total lines in CSV: ${lines.length}`);
-
-  const data: any[] = [];
-  let skippedRows = 0;
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) {
-      skippedRows++;
-      continue;
-    }
-
-    const values = line.split(',').map(v => v.trim());
+    console.log(`🤖 Trying model: ${model}`);
 
     try {
-      const dateStr = values[dateIdx] || '';
-      const parsedDate = parseDDMMYYYY(dateStr);
-      
-      // Skip rows with invalid dates
-      if (!dateStr || !parsedDate) {
-        skippedRows++;
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://your-app.com',
+          'X-Title': 'Stock Screener AI',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: query }
+          ],
+          temperature: 0.3,
+          max_tokens: 500,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`❌ Model ${model} failed: ${response.status} - ${errText}`);
+        lastError = new Error(`Model ${model} returned ${response.status}`);
         continue;
       }
 
-      const record = {
-        symbol: values[symbolIdx] || '',
-        date: dateStr, // Keep original dd-mm-yyyy format
-        _dateObj: parsedDate, // Store parsed date for sorting
-        open: parseFloat(values[openIdx]) || 0,
-        high: parseFloat(values[highIdx]) || 0,
-        low: parseFloat(values[lowIdx]) || 0,
-        close: parseFloat(values[closeIdx]) || 0,
-        volume: parseFloat(values[volumeIdx]) || 0,
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim();
+
+      if (!content) {
+        console.error(`❌ Model ${model} returned empty content`);
+        lastError = new Error(`Model ${model} returned empty content`);
+        continue;
+      }
+
+      const parsed = JSON.parse(content);
+      const confidence = parsed.confidence || 'medium';
+
+      console.log(`✅ Model ${model} succeeded with confidence: ${confidence}`);
+
+      const result: ParsedQuery = {
+        category: parsed.category,
+        conditions: parsed.conditions || [],
+        confidence,
+        parser: 'llm',
+        modelUsed: model,
+        llmFallback: parsed.llmFallback || null,
+        modelsAttempted,
       };
 
-      if (record.symbol) {
-        data.push(record);
-      }
-    } catch (error) {
-      console.warn(`Skipping invalid row ${i}:`, error);
-      skippedRows++;
+      // Log LLM usage
+      await logLLMUsage(userId, query, result, supabaseAdmin);
+
+      return result;
+    } catch (error: any) {
+      console.error(`❌ Model ${model} error:`, error.message);
+      lastError = error;
+      continue;
     }
   }
 
-  // Sort by symbol (ascending), then by date (ascending)
-  data.sort((a, b) => {
-    const symbolCompare = a.symbol.localeCompare(b.symbol);
-    if (symbolCompare !== 0) return symbolCompare;
-    return a._dateObj.getTime() - b._dateObj.getTime();
-  });
-
-  // Remove temporary _dateObj after sorting
-  data.forEach(record => delete record._dateObj);
-
-  const uniqueSymbols = new Set(data.map(d => d.symbol)).size;
-  const dates = data.map(d => d.date);
-  
-  console.log(`📊 Parsed ${data.length} records (${skippedRows} skipped)`);
-  console.log(`📊 Unique symbols: ${uniqueSymbols}`);
-  console.log(`📊 Date range: ${dates[0]} to ${dates[dates.length - 1]}`);
-
-  return data;
+  console.error('❌ All LLM models failed');
+  throw lastError || new Error('All LLM models failed');
 }
 
-// ============ SCREENING LOGIC ============
-
-async function screenStocks(data: any[], filter: ParsedQuery): Promise<any[]> {
-  const grouped = groupBySymbol(data);
-  const results: any[] = [];
-
-  for (const [symbol, symbolData] of grouped.entries()) {
-    if (symbolData.length < 50) continue;
-
-    const condition = filter.conditions[0];
-    if (!condition) continue;
-
-    const result = await applyCondition(symbolData, condition);
-
-    if (result.pass) {
-      const lastRow = symbolData[symbolData.length - 1];
-      const prevRow = symbolData[symbolData.length - 2];
-      const change = prevRow ? ((lastRow.close - prevRow.close) / prevRow.close) * 100 : 0;
-      
-      results.push({
-        symbol: lastRow.symbol,
-        close: lastRow.close,
-        volume: lastRow.volume,
-        change,
-        indicator_value: result.value,
-        indicator_name: result.indicator,
-      });
-    }
-  }
-
-  return results;
-}
-
-function groupBySymbol(data: any[]): Map<string, any[]> {
-  const grouped = new Map<string, any[]>();
-
-  for (const row of data) {
-    if (!grouped.has(row.symbol)) {
-      grouped.set(row.symbol, []);
-    }
-    grouped.get(row.symbol)!.push(row);
-  }
-
-  for (const [, rows] of grouped) {
-    rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }
-
-  return grouped;
-}
-
-async function applyCondition(data: any[], cond: ScreenerCondition): Promise<{ pass: boolean; value: number; indicator: string }> {
-  if (cond.category === 1) {
-    return handleIndicatorThreshold(data, cond);
-  } else if (cond.category === 2) {
-    return handlePriceVsMA(data, cond);
-  } else if (cond.category === 5) {
-    return handleVolumeVolatility(data, cond);
-  }
-
-  return { pass: false, value: 0, indicator: 'unknown' };
-}
-
-function handleIndicatorThreshold(data: any[], cond: ScreenerCondition): { pass: boolean; value: number; indicator: string } {
-  const ind = cond.indicator!;
-  const win = cond.window || 14;
-  const op = cond.op!;
-  const targetVal = cond.value || 0;
-
+async function logLLMUsage(
+  userId: string | undefined,
+  query: string,
+  result: ParsedQuery,
+  supabaseAdmin: any
+): Promise<void> {
   try {
-    let latest: number;
+    console.log('📝 Logging LLM usage...');
+    
+    const { error } = await supabaseAdmin.from('llm_usage_logs').insert({
+      user_id: userId || null,
+      query_text: query,
+      parser_type: 'llm',
+      model_used: result.modelUsed,
+      confidence_score: result.confidence,
+      parsed_result: result,
+      models_attempted: result.modelsAttempted,
+    });
 
-    if (ind === 'rsi') {
-      latest = calculateRSI(data, win);
-    } else if (ind === 'cci') {
-      latest = calculateCCI(data, win);
+    if (error) {
+      console.error('❌ Failed to log LLM usage:', error);
     } else {
-      return { pass: false, value: 0, indicator: ind };
-    }
-
-    const pass = compareValues(latest, op, targetVal);
-    return { pass, value: latest, indicator: ind };
-  } catch (error) {
-    return { pass: false, value: 0, indicator: ind };
-  }
-}
-
-function handlePriceVsMA(data: any[], cond: ScreenerCondition): { pass: boolean; value: number; indicator: string } {
-  const maType = cond.ma_type!;
-  const win = cond.window!;
-  const op = cond.op!;
-
-  try {
-    const closes = data.map(d => d.close);
-    const ma = calculateSMAFromValues(closes.slice(-win));
-    const price = data[data.length - 1].close;
-    const prevPrice = data[data.length - 2]?.close;
-    const prevMA = calculateSMAFromValues(closes.slice(-win - 1, -1));
-
-    if (op === 'crossed_above') {
-      const pass = prevPrice <= prevMA && price > ma;
-      return { pass, value: price, indicator: `${maType}_${win}` };
-    } else if (op === 'crossed_below') {
-      const pass = prevPrice >= prevMA && price < ma;
-      return { pass, value: price, indicator: `${maType}_${win}` };
-    } else {
-      const pass = op === '>' ? price > ma : price < ma;
-      return { pass, value: price, indicator: `${maType}_${win}` };
+      console.log('✅ LLM usage logged successfully');
     }
   } catch (error) {
-    return { pass: false, value: 0, indicator: `${maType}_${win}` };
-  }
-}
-
-function handleVolumeVolatility(data: any[], cond: ScreenerCondition): { pass: boolean; value: number; indicator: string } {
-  const ind = cond.indicator!;
-  const win = cond.window || 20;
-  const targetVal = cond.value || 0;
-
-  try {
-    if (ind === 'volume_sma') {
-      const volumes = data.slice(-win).map(d => d.volume);
-      const volumeSMA = calculateSMAFromValues(volumes);
-      const currentVolume = data[data.length - 1].volume;
-      const ratio = currentVolume / volumeSMA;
-      const pass = ratio >= targetVal;
-      return { pass, value: ratio, indicator: 'volume_spike' };
-    }
-
-    return { pass: false, value: 0, indicator: ind };
-  } catch (error) {
-    return { pass: false, value: 0, indicator: ind };
-  }
-}
-
-// ============ TECHNICAL INDICATORS ============
-
-function calculateRSI(data: any[], period: number = 14): number {
-  if (data.length < period + 1) throw new Error('Insufficient data for RSI');
-
-  const closes = data.map(d => d.close);
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const change = closes[i] - closes[i - 1];
-    if (change > 0) gains += change;
-    else losses += Math.abs(change);
-  }
-
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-function calculateCCI(data: any[], period: number = 20): number {
-  if (data.length < period) throw new Error('Insufficient data for CCI');
-
-  const recentData = data.slice(-period);
-  const typicalPrices = recentData.map(d => (d.high + d.low + d.close) / 3);
-  const sma = typicalPrices.reduce((a, b) => a + b, 0) / period;
-  const meanDeviation = typicalPrices.reduce((sum, tp) => sum + Math.abs(tp - sma), 0) / period;
-
-  const latestTP = typicalPrices[typicalPrices.length - 1];
-  return (latestTP - sma) / (0.015 * meanDeviation);
-}
-
-function calculateSMAFromValues(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, val) => sum + Number(val), 0) / values.length;
-}
-
-function compareValues(actual: number, op: string, target: number): boolean {
-  switch (op) {
-    case '>': return actual > target;
-    case '>=': return actual >= target;
-    case '<': return actual < target;
-    case '<=': return actual <= target;
-    case '==': return Math.abs(actual - target) < 0.0001;
-    default: return false;
+    console.error('❌ Error logging LLM usage:', error);
   }
 }
